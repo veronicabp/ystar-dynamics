@@ -1,0 +1,170 @@
+# %%
+
+import pandas as pd
+import numpy as np
+import os
+import re
+from word2number import w2n
+import sys
+from textblob import TextBlob
+from dateutil.parser import parse
+from math import ceil
+from spellchecker import SpellChecker
+from tqdm import tqdm
+from pqdm.processes import pqdm
+from multiprocessing import Pool, cpu_count
+import time
+import statsmodels.api as sm
+from sklearn.utils import resample
+from scipy.optimize import curve_fit
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message="kurtosistest only valid for n>=20")
+warnings.filterwarnings(
+    "ignore", message="omni_normtest is not valid with less than 8 observations"
+)
+
+tqdm.pandas()
+pd.set_option("future.no_silent_downcasting", True)
+
+n_jobs = int(os.cpu_count()) - 2
+hedonics_rm = ["bedrooms", "floorarea", "bathrooms", "livingrooms", "yearbuilt"]
+
+
+class UnionFind:
+    def __init__(self):
+        self.parent = {}
+
+    def find(self, x):
+        if x not in self.parent:
+            self.parent[x] = x
+            return x
+        if self.parent[x] == x:
+            return x
+        self.parent[x] = self.find(self.parent[x])  # Path compression
+        return self.parent[x]
+
+    def union(self, x, y):
+        rootX = self.find(x)
+        rootY = self.find(y)
+        if rootX != rootY:
+            self.parent[rootY] = rootX
+
+    def are_connected(self, x, y):
+        return self.find(x) == self.find(y)
+
+    def build_groups(self):
+        groups = {}
+        for element in self.parent:
+            root = self.find(element)
+            if root not in groups:
+                groups[root] = set()
+            groups[root].add(element)
+        return groups
+
+    def get_group(self, x):
+        root = self.find(x)
+        group = set()
+        for element in self.parent:
+            if self.find(element) == root:
+                group.add(element)
+        return group
+
+    def find_smallest_connector(self, group1, group2, min_diff=1):
+        smallest_diff = float("inf")
+        smallest_pair = None
+
+        for elem1 in group1:
+            for elem2 in group2:
+                diff = abs(elem1 - elem2)
+                if diff < smallest_diff:
+                    smallest_diff = diff
+                    smallest_pair = (elem1, elem2)
+
+                    if smallest_diff == min_diff:
+                        break
+
+        return smallest_pair
+
+
+def remove_punt(s):
+    for punct in [".", ",", "'", "(", ")", "FLAT ", "APARTMENT "]:
+        s = s.replace(punct, "")
+    s = s.replace(" - ", "-")
+    return s
+
+
+def create_string_id(
+    df, key_name="property_id", columns=["flat_number", "street_number", "postcode"]
+):
+    df[key_name] = df[columns].fillna("").agg(" ".join, axis=1)
+    df[key_name] = df[key_name].str.upper()
+    df[key_name] = df[key_name].apply(remove_punt)
+    df[key_name] = df[key_name].str.replace(r"\s+", " ", regex=True).str.strip()
+    return df
+
+
+def years_between_dates(s):
+    return s.apply(lambda x: x.n / 365 if pd.notna(x) else np.nan)
+
+
+def month_str(n):
+    # Ensure n is within the valid range of 1-12
+    if 1 <= n <= 12:
+        # Create a date object for the first day of the nth month in any year (e.g., 2020)
+        date = datetime(2020, n, 1)
+        # Return the month name
+        return date.strftime("%B")  # %B for full month name, %b for abbreviated name
+    else:
+        return str(n)
+
+
+def get_union(df):
+    uf = UnionFind()
+    for i, row in df.iterrows():
+        uf.union(row["date"], row["L_date"])
+    return uf
+
+
+def estimate_ystar(df, lhs_var="did_rsi"):
+    def model_function(X, ystar):
+        T, k = X
+        # Compute the exponents
+        exponent_A = (ystar / 100) * (T + k)
+        exponent_B = (ystar / 100) * T
+
+        # Calculate the expressions, ensuring numerical stability
+        expr1 = np.log(np.clip(1 - np.exp(-exponent_A), 1e-15, None))
+        expr2 = np.log(np.clip(1 - np.exp(-exponent_B), 1e-15, None))
+
+        return expr1 - expr2
+
+    # Drop missing observations
+    df.drop(
+        df[(df["T"].isna()) | (df["k"].isna()) | (df[lhs_var].isna())].index,
+        inplace=True,
+    )
+
+    # Prepare the independent variables
+    xdata = np.vstack((df["T"], df["k"]))
+
+    # Initial guess for ystar
+    initial_guess = [3]
+
+    # Set bounds for ystar to ensure it stays positive
+    bounds = (0, np.inf)
+
+    # Perform the curve fitting
+    popt, pcov = curve_fit(
+        model_function, xdata, df[lhs_var], p0=initial_guess, bounds=bounds
+    )
+
+    # Extract the estimated parameter and its standard error
+    ystar_estimate = popt[0]
+    ystar_std_error = np.sqrt(np.diag(pcov))[0]
+
+    return ystar_estimate, ystar_std_error
+
+
+# %%
