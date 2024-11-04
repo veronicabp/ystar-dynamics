@@ -2,7 +2,6 @@
 
 from utils import *
 
-
 def haversine(lat1, lon1, lat2, lon2):
     """
     calculate the Haversine distance between two points on the earth in kilometers.
@@ -89,6 +88,9 @@ def restrict_data(
             if len(sub) > len(dates):
                 controls = sub
                 break
+
+        elif len(sub)==len(controls):
+            break
 
         # text += f"\nRADIUS TOO SMALL: {radius}\n"
         # text += f"\n{sub[['property_id','date','L_date','duration2023','distance']].head(50)}\n\n\n"
@@ -204,6 +206,7 @@ def rsi_wrapper(
 
     # text += f"{summary}\n\n"
     # text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row['d_log_price']} for treated"
+    # text += f'Radius = {radius}'
     # print(text)
 
     N = len(controls)
@@ -382,8 +385,8 @@ def get_rsi(
     duration_margin=5,
     parallelize=True,
     groupby="area",
+    n_jobs=10
 ):
-    n_jobs = 1
 
     for df in [extensions, controls]:
         df.drop(df[df[price_var].isna()].index, inplace=True)
@@ -427,6 +430,7 @@ def get_rsi(
                 func,
             )
         )
+    print(f'Num chunks: {len(chunks)}')
     print(f"Skipped {skipped}.")
 
     results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
@@ -467,6 +471,7 @@ def restrict_columns(df):
             "years_held",
             "d_log_price",
             "area",
+            "postcode",
             "extension",
             "latitude",
             "longitude",
@@ -555,46 +560,60 @@ def construct_rsi(
     # rsi = get_rsi(extensions, controls, start_date=start_date, end_date=end_date, case_shiller=True)
     # rsi.to_pickle(os.path.join(data_folder, 'clean', 'rsi_flip.p'))
 
-    # RSI - excluding flippers (Baseline Method)
-    print("Getting baseline RSI")
+    # # RSI - excluding flippers (Baseline Method)
+    # print("Getting baseline RSI")
     df.drop(df[df.years_held < 2].index, inplace=True)
     extensions, controls = get_extensions_controls(df)
-    rsi = get_rsi(
-        extensions,
-        controls,
-        start_date=start_date,
-        end_date=end_date,
-        case_shiller=True,
-    )
-    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi.p"))
+    # rsi = get_rsi(
+    #     extensions,
+    #     controls,
+    #     start_date=start_date,
+    #     end_date=end_date,
+    #     case_shiller=True,
+    # )
+    # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi.p"))
 
     # Hedonics variation
 
-    # No weights
-    print("Getting BMN RSI")
-    rsi = get_rsi(
-        extensions,
-        controls,
-        start_date=start_date,
-        end_date=end_date,
-        case_shiller=False,
-    )
-    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_bmn.p"))
+    # # No weights
+    # print("Getting BMN RSI")
+    # print(f'Num cores: {os.cpu_count()}')
+    # rsi = get_rsi(
+    #     extensions,
+    #     controls,
+    #     start_date=start_date,
+    #     end_date=end_date,
+    #     case_shiller=False,
+    #     n_jobs=os.cpu_count()
+    # )
+    # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_bmn.p"))
 
-    # Yearly
+    # # Yearly
     print("Getting annual RSI")
     df["date"] = df["year"]
     df["L_date"] = df["L_year"]
     df.drop(df[df.date == df.L_date].index, inplace=True)
     extensions, controls = get_extensions_controls(df)
+    # rsi = get_rsi(
+    #     extensions,
+    #     controls,
+    #     start_date=start_year,
+    #     end_date=end_year,
+    #     case_shiller=True,
+    # )
+    # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_yearly.p"))
+
+    # Postcode RSI
+    print('Postcode RSI:')
     rsi = get_rsi(
         extensions,
         controls,
         start_date=start_year,
         end_date=end_year,
         case_shiller=True,
+        groupby='postcode'
     )
-    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_yearly.p"))
+    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_postcode.p"))
 
 
 def update_rsi(

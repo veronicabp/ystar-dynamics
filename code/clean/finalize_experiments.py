@@ -89,24 +89,24 @@ def create_experiments(df_main, rsi_dfs, data_folder):
     # df_main["Pi"] = df_main["Pi"].fillna(0)
     # df_main.drop(columns=["cum_prob"], inplace=True)
 
-    # Remove 1% of outliers
-    for col in df_main.columns:
-        if col.startswith("did_rsi"):
-            lower = df_main[col].quantile(0.005)
-            upper = df_main[col].quantile(0.995)
-            df_main[col] = df_main[col].clip(lower, upper)
-
     # Keep sample period
     df_main = df_main[df_main["year"] >= 2000]
 
     # Drop properties at the very low end of the yield curve
-    df_main = df_main[df_main["T"] > 20]
+    df_main = df_main[df_main["T"] > 30]
 
     # Drop properties extended within a month of purchase
     df_main["years_diff"] = years_between_dates(
         df_main["date_extended"] - df_main["L_date_trans"].dt.to_period("D")
     )
     df_main = df_main[df_main["years_diff"] > 1 / 12]
+
+    # Remove 1% of outliers
+    for col in df_main.columns:
+        if col.startswith("did_rsi"):
+            lower = df_main[col].quantile(0.005)
+            upper = df_main[col].quantile(0.995)
+            df_main[col] = df_main[col].clip(lower, upper)
 
     # Create version without flippers
     df_flip = df_main.copy()
@@ -163,5 +163,19 @@ def create_experiments(df_main, rsi_dfs, data_folder):
 
     return df_main, df_flip, df_public
 
+def run_create_experiments(data_folder):
+    print("Creating experiments final dataset.")
+    df = pd.read_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
+    extensions = df.drop(df[~df.extension].index)
+
+    rsi_dfs = []
+    for tag in ["", "_bmn", "_yearly", "_postcode"]:
+        print(f">Loading rsi{tag}")
+        rsi = pd.read_pickle(os.path.join(data_folder, "clean", f"rsi{tag}.p"))
+        rsi_clean = clean_rsi(rsi, tag)
+        rsi_dfs.append(rsi_clean)
+
+    df_main, df_flip, df_public = create_experiments(extensions, rsi_dfs, data_folder)
+    df_main.to_pickle(os.path.join(data_folder, "clean", "experiments.p"))
 
 # %%

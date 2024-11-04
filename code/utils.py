@@ -17,6 +17,8 @@ import time
 import statsmodels.api as sm
 from sklearn.utils import resample
 from scipy.optimize import curve_fit
+from scipy.optimize import least_squares
+import pickle
 import warnings
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -128,8 +130,7 @@ def get_union(df):
 
 
 def estimate_ystar(df, lhs_var="did_rsi"):
-    def model_function(X, ystar):
-        T, k = X
+    def model_function(ystar, T, k):
         # Compute the exponents
         exponent_A = (ystar / 100) * (T + k)
         exponent_B = (ystar / 100) * T
@@ -139,6 +140,10 @@ def estimate_ystar(df, lhs_var="did_rsi"):
         expr2 = np.log(np.clip(1 - np.exp(-exponent_B), 1e-15, None))
 
         return expr1 - expr2
+    
+    def residuals(params, T, k, lhs_var):
+        # Calculate residuals
+        return lhs_var - model_function(params, T, k)
 
     # Drop missing observations
     df.drop(
@@ -146,23 +151,49 @@ def estimate_ystar(df, lhs_var="did_rsi"):
         inplace=True,
     )
 
-    # Prepare the independent variables
-    xdata = np.vstack((df["T"], df["k"]))
+    # Extract key columns
+    did = df[lhs_var]
+    T = df['T']
+    k = df['k']
 
     # Initial guess for ystar
     initial_guess = [3]
 
-    # Set bounds for ystar to ensure it stays positive
-    bounds = (0, np.inf)
-
-    # Perform the curve fitting
-    popt, pcov = curve_fit(
-        model_function, xdata, df[lhs_var], p0=initial_guess, bounds=bounds
+    # Perform the least squares optimization
+    result = least_squares(
+        residuals,
+        initial_guess,
+        args=(T, k, did),
+        bounds=([0], [np.inf]),  # Ensure ystar stays positive
+        method='trf',            # Trust Region Reflective algorithm
+        jac='2-point'            # Numerical estimation of the Jacobian
     )
 
-    # Extract the estimated parameter and its standard error
-    ystar_estimate = popt[0]
-    ystar_std_error = np.sqrt(np.diag(pcov))[0]
+    # Extract the estimated parameter
+    ystar_estimate = result.x[0]
+
+    # Calculate residuals at the solution
+    resid = result.fun  # This is lhs_var - model_function(params, T, k)
+
+    # Obtain the Jacobian matrix at the solution
+    J = result.jac      # Shape: (number of observations, number of parameters)
+
+    # Number of observations and parameters
+    n_obs = len(did)
+    n_params = len(result.x)
+
+    # Compute the robust covariance matrix using the sandwich estimator
+    # Inverse of (J^T J)
+    JTJ_inv = np.linalg.inv(J.T @ J)
+
+    # Middle matrix: J^T * diag(residuals^2) * J
+    middle_matrix = J.T @ np.diag(resid ** 2) @ J
+
+    # Robust covariance matrix
+    robust_cov = JTJ_inv @ middle_matrix @ JTJ_inv
+
+    # Extract the robust standard error for ystar
+    ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
 
     return ystar_estimate, ystar_std_error
 
