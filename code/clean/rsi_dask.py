@@ -2,6 +2,7 @@
 
 from utils import *
 
+
 def haversine(lat1, lon1, lat2, lon2):
     """
     calculate the Haversine distance between two points on the earth in kilometers.
@@ -44,7 +45,9 @@ def restrict_data(
         ]
 
     # Restrict by distance
-    controls["distance"] = haversine(row.lat_rad, row.lon_rad, controls["lat_rad"].values, controls["lon_rad"].values)
+    controls["distance"] = haversine(
+        row.lat_rad, row.lon_rad, controls["lat_rad"].values, controls["lon_rad"].values
+    )
 
     # Choose smallest distance such that the dates are connected
     dates = None
@@ -79,7 +82,7 @@ def restrict_data(
                 controls = sub
                 break
 
-        elif len(sub)==len(controls):
+        elif len(sub) == len(controls):
             break
 
     return controls, dates, text, radius
@@ -190,6 +193,7 @@ def rsi_wrapper(
     N = len(controls)
     return [d_rsi, N, radius]
 
+
 def get_dummies(df, start_date=1995, end_date=2023, date_var="date"):
     df[date_var] = df[date_var].astype(int)
     df[f"L_{date_var}"] = df[f"L_{date_var}"].astype(int)
@@ -223,7 +227,7 @@ def get_rsi(
     parallelize=True,
     groupby="area",
     n_jobs=10,
-    client=None
+    client=None,
 ):
 
     for df in [extensions, controls]:
@@ -235,13 +239,14 @@ def get_rsi(
     controls = get_dummies(controls, start_date=start_date, end_date=end_date)
 
     # Partition dataset
-    extensions_grouped =  {name: group for name, group in extensions.groupby([groupby, 'duration2023'])}
+    extensions_grouped = {
+        key: group for key, group in extensions.groupby([groupby, "duration2023"])
+    }
     controls_grouped_geo = {name: group for name, group in controls.groupby(groupby)}
     controls_grouped = dict()
 
     skipped = 0
-    chunks = []
-    for key, group in extensions_grouped:
+    for key in extensions_grouped:
         geo, duration2023 = key
 
         if geo not in controls_grouped_geo:
@@ -250,19 +255,21 @@ def get_rsi(
             continue
 
         controls_sub = controls_grouped_geo[geo]
-        controls_sub = controls_sub[abs(controls_sub["duration2023"] - duration2023) <= duration_margin].copy()
+        controls_sub = controls_sub[
+            abs(controls_sub["duration2023"] - duration2023) <= duration_margin
+        ].copy()
 
-        if len(controls_sub)==0:
+        if len(controls_sub) == 0:
             skipped += 1
             controls_grouped[key] = None
             continue
 
         controls_grouped[key] = controls_sub
-    print(f'Skipped {skipped}.')
+    print(f"Skipped {skipped}.")
 
     # Function to process each postcode area
     def process_partition(key):
-        geo, duration2023 = key
+        # print("key:", key)
         extensions_sub = extensions_grouped[key]
         controls_sub = controls_grouped[key]
 
@@ -289,15 +296,18 @@ def get_rsi(
     # Execute tasks in parallel
     if client:
         futures = client.compute(tasks)
+        progress(futures)
         results = client.gather(futures)
     else:
         # Use default Dask compute function
-        results = compute(*tasks)
+        with ProgressBar():
+            results = compute(*tasks)
 
     # Combine results
     output = pd.concat(results)
 
     return output
+
 
 def split_into_chunks(grouped_data, threshold_size):
     """
@@ -317,6 +327,7 @@ def split_into_chunks(grouped_data, threshold_size):
         else:
             chunks.append((key, group))
     return chunks
+
 
 def add_weights(df, residuals):
     X = residuals[["years_held", "distance"]]
@@ -407,7 +418,7 @@ def construct_rsi(
     data_folder, start_year=1995, start_month=1, end_year=2024, end_month=1
 ):
     # client = Client(scheduler_file='scheduler.json')
-    client=None
+    client = None
 
     start_date = start_year * 4 + start_month
     end_date = end_year * 4 + end_month
@@ -416,13 +427,13 @@ def construct_rsi(
     df.drop(df[df.years_held < 2].index, inplace=True)
     extensions, controls = get_extensions_controls(df)
 
-    df['area_count'] = df.groupby('area')['area'].transform('count')
+    df["area_count"] = df.groupby("area")["area"].transform("count")
     df = df[df.area_count <= 25_000]
 
-    print('Processing the following areas:', sorted(df.area.unique()))
+    print("Processing the following areas:", sorted(df.area.unique()))
 
     print("Getting BMN RSI")
-    print(f'Num cores: {os.cpu_count()}')
+    print(f"Num cores: {os.cpu_count()}")
     rsi = get_rsi(
         extensions,
         controls,
@@ -430,6 +441,6 @@ def construct_rsi(
         end_date=end_date,
         case_shiller=False,
         n_jobs=10,
-        client=client
+        client=client,
     )
     rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_test.p"))

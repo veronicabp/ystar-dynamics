@@ -2,23 +2,35 @@
 
 import pandas as pd
 import numpy as np
-import os
-import re
-from word2number import w2n
-import sys
-from textblob import TextBlob
-from dateutil.parser import parse
-from math import ceil
-from spellchecker import SpellChecker
-from tqdm import tqdm
+
+import dask.dataframe as dd
+from dask.distributed import Client, progress
+from dask.diagnostics import ProgressBar
+from dask import delayed, compute
 from pqdm.processes import pqdm
 from multiprocessing import Pool, cpu_count
+
+from tqdm import tqdm
+
+import os
+import re
+import sys
 import time
+import csv
+from math import ceil
+
+from word2number import w2n
+from textblob import TextBlob
+from dateutil.parser import parse
+from spellchecker import SpellChecker
+
+import pickle
+
 import statsmodels.api as sm
 from sklearn.utils import resample
 from scipy.optimize import curve_fit
 from scipy.optimize import least_squares
-import pickle
+
 import warnings
 
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -26,12 +38,16 @@ warnings.filterwarnings("ignore", message="kurtosistest only valid for n>=20")
 warnings.filterwarnings(
     "ignore", message="omni_normtest is not valid with less than 8 observations"
 )
+warnings.filterwarnings("ignore", message=".*kurtosistest.*")
 
 tqdm.pandas()
 pd.set_option("future.no_silent_downcasting", True)
 
 n_jobs = int(os.cpu_count()) - 2
 hedonics_rm = ["bedrooms", "floorarea", "bathrooms", "livingrooms", "yearbuilt"]
+
+# Connect to Dask scheduler on the main node (change to scheduler address if needed)
+# client = Client("tcp://$(hostname -s):8786")  # This uses the SLURM main node
 
 
 class UnionFind:
@@ -140,7 +156,7 @@ def estimate_ystar(df, lhs_var="did_rsi"):
         expr2 = np.log(np.clip(1 - np.exp(-exponent_B), 1e-15, None))
 
         return expr1 - expr2
-    
+
     def residuals(params, T, k, lhs_var):
         # Calculate residuals
         return lhs_var - model_function(params, T, k)
@@ -153,8 +169,8 @@ def estimate_ystar(df, lhs_var="did_rsi"):
 
     # Extract key columns
     did = df[lhs_var]
-    T = df['T']
-    k = df['k']
+    T = df["T"]
+    k = df["k"]
 
     # Initial guess for ystar
     initial_guess = [3]
@@ -165,8 +181,8 @@ def estimate_ystar(df, lhs_var="did_rsi"):
         initial_guess,
         args=(T, k, did),
         bounds=([0], [np.inf]),  # Ensure ystar stays positive
-        method='trf',            # Trust Region Reflective algorithm
-        jac='2-point'            # Numerical estimation of the Jacobian
+        method="trf",  # Trust Region Reflective algorithm
+        jac="2-point",  # Numerical estimation of the Jacobian
     )
 
     # Extract the estimated parameter
@@ -176,7 +192,7 @@ def estimate_ystar(df, lhs_var="did_rsi"):
     resid = result.fun  # This is lhs_var - model_function(params, T, k)
 
     # Obtain the Jacobian matrix at the solution
-    J = result.jac      # Shape: (number of observations, number of parameters)
+    J = result.jac  # Shape: (number of observations, number of parameters)
 
     # Number of observations and parameters
     n_obs = len(did)
@@ -187,7 +203,7 @@ def estimate_ystar(df, lhs_var="did_rsi"):
     JTJ_inv = np.linalg.inv(J.T @ J)
 
     # Middle matrix: J^T * diag(residuals^2) * J
-    middle_matrix = J.T @ np.diag(resid ** 2) @ J
+    middle_matrix = J.T @ np.diag(resid**2) @ J
 
     # Robust covariance matrix
     robust_cov = JTJ_inv @ middle_matrix @ JTJ_inv

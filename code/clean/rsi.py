@@ -2,6 +2,7 @@
 
 from utils import *
 
+
 def haversine(lat1, lon1, lat2, lon2):
     """
     calculate the Haversine distance between two points on the earth in kilometers.
@@ -89,7 +90,7 @@ def restrict_data(
                 controls = sub
                 break
 
-        elif len(sub)==len(controls):
+        elif len(sub) == len(controls):
             break
 
         # text += f"\nRADIUS TOO SMALL: {radius}\n"
@@ -385,7 +386,7 @@ def get_rsi(
     duration_margin=5,
     parallelize=True,
     groupby="area",
-    n_jobs=10
+    n_jobs=10,
 ):
 
     for df in [extensions, controls]:
@@ -430,7 +431,7 @@ def get_rsi(
                 func,
             )
         )
-    print(f'Num chunks: {len(chunks)}')
+    print(f"Num chunks: {len(chunks)}")
     print(f"Skipped {skipped}.")
 
     results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
@@ -604,14 +605,14 @@ def construct_rsi(
     # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_yearly.p"))
 
     # Postcode RSI
-    print('Postcode RSI:')
+    print("Postcode RSI:")
     rsi = get_rsi(
         extensions,
         controls,
         start_date=start_year,
         end_date=end_year,
         case_shiller=True,
-        groupby='postcode'
+        groupby="postcode",
     )
     rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_postcode.p"))
 
