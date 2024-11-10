@@ -2,7 +2,8 @@
 from clean.price_paid import clean_price_paid
 from clean.leases import clean_leases
 from clean.merge_hmlr import merge_hmlr
-from clean.rsi_dask import construct_rsi
+# from clean.rsi_dask import construct_rsi
+from clean.rsi import construct_rsi, get_residuals
 from clean.bootstrap_rsi import bootstrap_rsi
 from clean.finalize_experiments import run_create_experiments
 from utils import *
@@ -23,7 +24,8 @@ if __name__ == "__main__":
     # Finalize
 
     # Create RSI
-    construct_rsi(data_folder)
+    get_residuals(data_folder)
+    # construct_rsi(data_folder)
     # bootstrap_rsi(data_folder)
 
     # Finalize experiments

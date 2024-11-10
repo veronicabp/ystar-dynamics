@@ -26,13 +26,14 @@ def haversine(lat1, lon1, lat2, lon2):
 
 def restrict_data(
     row,
-    controls,
+    control_dict,
     text="",
     restrict_price=False,
     remove_previous=False,
     connect_all=False,
     radii=[0.1, 0.5] + [i for i in range(1, 21)],
 ):
+    controls = control_dict[row.duration2023]
 
     # Remove previous transactions of this property
     if remove_previous:
@@ -230,6 +231,41 @@ def get_rsi(
     client=None,
 ):
 
+    # Get SLURM environment variables
+    cpus_per_task = int(os.getenv("SLURM_CPUS_PER_TASK", default="1"))
+    num_tasks = int(os.getenv("SLURM_NTASKS", default="1"))
+    num_nodes = int(os.getenv("SLURM_NNODES", default="1"))
+    memory_per_node = 32768
+
+    total_cpus = num_tasks * cpus_per_task
+
+    print(f"Num nodes: {num_nodes}")
+    print(f"Num tasks: {num_tasks}")
+    print(f"CPUs per task: {cpus_per_task}")
+    print(f"Total CPUs: {total_cpus}")
+    print(f"Memory per node: {memory_per_node}")
+
+    # # Set up Dask LocalCluster
+    # cluster = LocalCluster(
+    #     n_workers=total_cpus,
+    #     threads_per_worker=1,
+    #     processes=True,
+    #     memory_limit='auto',
+    #     local_directory="/tmp",  # Optional: specify a directory for worker data
+    # )
+
+    # client = Client(cluster)
+
+    # Set up SLURMCluster
+    cluster = LocalCluster(
+        n_workers=cpus_per_task,      # One worker per CPU core
+        threads_per_worker=1,         # Each worker is single-threaded
+        memory_limit='auto',          # Automatically allocate memory for each worker
+        local_directory="/tmp"         # Temporary directory for worker data, optional
+    )
+
+    client = Client(cluster)
+
     for df in [extensions, controls]:
         df.drop(df[df[price_var].isna()].index, inplace=True)
         df["lat_rad"] = np.deg2rad(df["latitude"])
@@ -238,49 +274,44 @@ def get_rsi(
     # Get dummies
     controls = get_dummies(controls, start_date=start_date, end_date=end_date)
 
-    # Partition dataset
-    extensions_grouped = {
-        key: group for key, group in extensions.groupby([groupby, "duration2023"])
-    }
-    controls_grouped_geo = {name: group for name, group in controls.groupby(groupby)}
-    controls_grouped = dict()
+    # Group by postcode area
+    threshold_size = np.minimum(len(extensions) / n_jobs, 500)
+    extensions_grouped = split_into_chunks(
+        {name: group for name, group in extensions.groupby(groupby)}, threshold_size
+    )
+    controls_grouped = {name: group for name, group in controls.groupby(groupby)}
 
     skipped = 0
-    for key in extensions_grouped:
-        geo, duration2023 = key
+    chunks = []
+    for key, group in extensions_grouped:
+        durations_list = group["duration2023"].unique()
+        # print(key, durations_list)
 
-        if geo not in controls_grouped_geo:
+        if key not in controls_grouped:
             skipped += 1
-            controls_grouped[key] = None
             continue
 
-        controls_sub = controls_grouped_geo[geo]
-        controls_sub = controls_sub[
-            abs(controls_sub["duration2023"] - duration2023) <= duration_margin
-        ].copy()
-
-        if len(controls_sub) == 0:
-            skipped += 1
-            controls_grouped[key] = None
-            continue
-
-        controls_grouped[key] = controls_sub
+        controls_subgroup = controls_grouped[key]
+        control_dict = {}
+        for duration2023 in durations_list:
+            control_dict[duration2023] = controls_subgroup[
+                abs(controls_subgroup["duration2023"] - duration2023) <= duration_margin
+            ].copy()
+        chunks.append((group, control_dict))
+    print(f"Num chunks: {len(chunks)}")
     print(f"Skipped {skipped}.")
 
-    # Function to process each postcode area
-    def process_partition(key):
-        # print("key:", key)
-        extensions_sub = extensions_grouped[key]
-        controls_sub = controls_grouped[key]
+    scattered_chunks = client.scatter(chunks, broadcast=True, timeout=60)  # timeout in seconds
 
-        if controls_sub is None:
-            return pd.DataFrame()
+    def process_partition(chunk):
+        extensions_sub, control_dict = chunk
+        print(f"Processing chunk with {len(extensions_sub)} rows.")
 
         # Call get_rsi for this area
         extensions_sub[["d_rsi", "num_controls", "radius"]] = extensions_sub.apply(
             lambda row: rsi_wrapper(
                 row,
-                controls_sub,
+                control_dict,
                 price_var=price_var,
                 case_shiller=case_shiller,
                 add_constant=add_constant,
@@ -291,21 +322,18 @@ def get_rsi(
         return extensions_sub
 
     # Create delayed tasks
-    tasks = [delayed(process_partition)(key) for key in extensions_grouped.keys()]
+    tasks = [delayed(process_partition)(chunk) for chunk in scattered_chunks]
 
     # Execute tasks in parallel
-    if client:
-        futures = client.compute(tasks)
-        progress(futures)
-        results = client.gather(futures)
-    else:
-        # Use default Dask compute function
-        with ProgressBar():
-            results = compute(*tasks)
+    futures = client.compute(tasks)
+    progress(futures)
+    results = client.gather(futures)
 
     # Combine results
     output = pd.concat(results)
 
+    client.close()
+    # cluster.close()
     return output
 
 
@@ -425,10 +453,12 @@ def construct_rsi(
 
     df = load_data(data_folder)
     df.drop(df[df.years_held < 2].index, inplace=True)
-    extensions, controls = get_extensions_controls(df)
 
-    df["area_count"] = df.groupby("area")["area"].transform("count")
-    df = df[df.area_count <= 25_000]
+    # df["area_count"] = df.groupby("area")["area"].transform("count")
+    # df = df[df.area_count <= 25_000]
+
+    df = df[df.area.isin(["AL", "BR"])]
+    extensions, controls = get_extensions_controls(df)
 
     print("Processing the following areas:", sorted(df.area.unique()))
 
@@ -443,4 +473,4 @@ def construct_rsi(
         n_jobs=10,
         client=client,
     )
-    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_test.p"))
+    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_test2.p"))

@@ -7,71 +7,58 @@ from clean.finalize_experiments import *
 
 def bootstrap_rsi(
     data_folder,
-    start_year=1995, 
+    bootstrap_iter=500,
+    start_year=1995,
     start_month=1,
     end_year=2024,
     end_month=1,
-    bootstrap_iter=100,
+    n_jobs=16,
 ):
-    
-    london_areas = ['N','NW','W','SW','SE','E','EC','WC']
-    area = 'AL'
 
-    # Set up start and end dates
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
     start_date = start_year * 4 + start_month
     end_date = end_year * 4 + end_month
+
     df = load_data(data_folder)
     df.drop(df[df.years_held < 2].index, inplace=True)
-    df = df[df.area==area]
 
-    # Load residuals and add weights
-    residuals = pd.read_pickle(os.path.join(data_folder, "working", "residuals.p"))
-    df = add_weights(df, residuals)
+    # df = df[(df.quarter == 1) & (df.L_quarter == 1)]
 
-    # Define the output CSV path
-    output_csv = os.path.join(data_folder, "working", "bootstrap_ystar.csv")
-    
-    # Load existing results to continue from the next open row
-    if os.path.exists(output_csv):
-        ystar_df = pd.read_csv(output_csv)
-        start_seed = len(ystar_df)  # Seed based on the next row
-    else:
-        # Create the CSV file with a header if it doesn't exist
-        ystar_df = pd.DataFrame(columns=["ystar_estimates"])
-        ystar_df.to_csv(output_csv, index=False)
-        start_seed = 0
+    for b in range(100,bootstrap_iter):
 
-    # Perform bootstrap
-    for b in range(start_seed, start_seed + bootstrap_iter):
-        print(f'\nBootstrap {b}')
-        print('-'*20)
+        if rank == 0:
+            print(f'Bootstrap iter {b}\n{"="*10}\n\n')
 
-        # Set random seed based on current iteration
         boot_sample = resample(df, random_state=b)
-        extensions, controls = get_extensions_controls(boot_sample.copy())
 
-        try:
-            # 1. Create RSI controls
-            rsi = get_rsi(
-                extensions,
-                controls,
-                start_date=start_date,
-                end_date=end_date,
-                case_shiller=True,
-            )
-        except Exception as e:
-            print(f"Exception: {e}")
-            print(boot_sample.head())
-            continue
+        extensions, controls = get_extensions_controls(boot_sample)
+        split = split_df_by_area(extensions, size)
 
-        rsi_clean = clean_rsi(rsi, "")
+        local_extensions = split[rank]
+        local_controls = controls.drop(
+            controls[~controls.area.isin(local_extensions.area.unique())].index
+        )
 
-        extensions = boot_sample.drop(boot_sample[~boot_sample.extension].index)
-        experiments, _, _ = create_experiments(extensions, [rsi_clean], data_folder)
+        # Get DF for this process
+        print(
+            f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
+        )
 
-        # 2. Estimate y-star
-        ystar, se = estimate_ystar(experiments)
+        rsi = get_rsi(
+            local_extensions,
+            local_controls,
+            start_date=start_date,
+            end_date=end_date,
+            case_shiller=False,
+            n_jobs=n_jobs,
+            rank=rank,
+        )
+        all_results = comm.gather(rsi, root=0)
 
-        # Append the ystar estimate to the CSV
-        ystar_df = pd.DataFrame({"ystar estimates": [ystar]})
-        ystar_df.to_csv(output_csv, mode='a', index=False, header=False)
+        if rank == 0:
+            file = os.path.join(data_folder, "working", "rsi", f"rsi_{b}.p")
+            combined_results = pd.concat(all_results)
+            combined_results.to_pickle(file)
