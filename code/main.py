@@ -6,11 +6,13 @@ from clean.merge_hmlr import merge_hmlr
 from clean.rsi import construct_rsi, get_residuals
 from clean.bootstrap_rsi import bootstrap_rsi
 from clean.finalize_experiments import run_create_experiments
+from analysis.compile_bootstrap import compile_bootstrap
 from utils import *
 
 if __name__ == "__main__":
     start = time.time()
     data_folder = "../data/original"
+    print('Starting MAIN.')
 
     # Clean price
     # clean_price_paid(data_folder)
@@ -19,19 +21,19 @@ if __name__ == "__main__":
     # clean_leases(data_folder)
 
     # Merge new data
-    # merge_hmlr(data_folder)
+    merge_hmlr(data_folder)
 
     # Finalize
 
     # Create RSI
-    get_residuals(data_folder)
+    # get_residuals(data_folder)
     # construct_rsi(data_folder)
-    # bootstrap_rsi(data_folder)
 
     # Finalize experiments
     # run_create_experiments(data_folder)
 
     # Create timeseries
+    # compile_bootstrap(data_folder)
 
     end = time.time()
     print(f"Time elapsed: {end-start}")

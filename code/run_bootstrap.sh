@@ -5,8 +5,8 @@
 #SBATCH --nodes=20                           # Number of nodes
 #SBATCH --ntasks-per-node=1                 # One task per node
 #SBATCH --cpus-per-task=16                  # CPUs per task
-#SBATCH --time=08:00:00                     # Time limit hrs:min:sec
-#SBATCH --partition=sched_mit_hill                # Partition name
+#SBATCH --time=12:00:00                     # Time limit hrs:min:sec
+#SBATCH --partition=newnodes                # Partition name
 #SBATCH --mem=60G                           # Memory per node
 
 # Activate your Conda environment

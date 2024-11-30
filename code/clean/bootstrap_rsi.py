@@ -27,7 +27,7 @@ def bootstrap_rsi(
 
     # df = df[(df.quarter == 1) & (df.L_quarter == 1)]
 
-    for b in range(100,bootstrap_iter):
+    for b in range(92,bootstrap_iter):
 
         if rank == 0:
             print(f'Bootstrap iter {b}\n{"="*10}\n\n')

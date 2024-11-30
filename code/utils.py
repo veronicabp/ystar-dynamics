@@ -151,7 +151,7 @@ def get_union(df):
     return uf
 
 
-def estimate_ystar(df, lhs_var="did_rsi"):
+def estimate_ystar(df, lhs_var="did_rsi", get_se=True):
     def model_function(ystar, T, k):
         # Compute the exponents
         exponent_A = (ystar / 100) * (T + k)
@@ -194,28 +194,31 @@ def estimate_ystar(df, lhs_var="did_rsi"):
     # Extract the estimated parameter
     ystar_estimate = result.x[0]
 
-    # Calculate residuals at the solution
-    resid = result.fun  # This is lhs_var - model_function(params, T, k)
+    if get_se:
+        # Calculate residuals at the solution
+        resid = result.fun  # This is lhs_var - model_function(params, T, k)
 
-    # Obtain the Jacobian matrix at the solution
-    J = result.jac  # Shape: (number of observations, number of parameters)
+        # Obtain the Jacobian matrix at the solution
+        J = result.jac  # Shape: (number of observations, number of parameters)
 
-    # Number of observations and parameters
-    n_obs = len(did)
-    n_params = len(result.x)
+        # Number of observations and parameters
+        n_obs = len(did)
+        n_params = len(result.x)
 
-    # Compute the robust covariance matrix using the sandwich estimator
-    # Inverse of (J^T J)
-    JTJ_inv = np.linalg.inv(J.T @ J)
+        # Compute the robust covariance matrix using the sandwich estimator
+        # Inverse of (J^T J)
+        JTJ_inv = np.linalg.inv(J.T @ J)
 
-    # Middle matrix: J^T * diag(residuals^2) * J
-    middle_matrix = J.T @ np.diag(resid**2) @ J
+        # Middle matrix: J^T * diag(residuals^2) * J
+        middle_matrix = J.T @ np.diag(resid**2) @ J
 
-    # Robust covariance matrix
-    robust_cov = JTJ_inv @ middle_matrix @ JTJ_inv
+        # Robust covariance matrix
+        robust_cov = JTJ_inv @ middle_matrix @ JTJ_inv
 
-    # Extract the robust standard error for ystar
-    ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
+        # Extract the robust standard error for ystar
+        ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
+    else:
+        ystar_std_error = None
 
     return ystar_estimate, ystar_std_error
 
