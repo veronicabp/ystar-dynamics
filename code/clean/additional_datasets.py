@@ -315,47 +315,46 @@ def make_timeseries(data_folder, year0=2003, year1=2023):
 
 def build_event_study(data_folder):
     rsi_full = pd.read_pickle(os.path.join(data_folder, "working", "rsi_full.p"))
-    # rsi_full["date_trans_ext"] = pd.to_datetime(rsi_full["date_trans"], format="%m/%d/%Y")
-    # rsi_full.drop(columns=["date_trans"], inplace=True)
-    # rsi_full.drop_duplicates(subset=["property_id", "date"], inplace=True)
-    # rsi_full_nd = f"{working}/rsi_full_nd.csv"
-    # rsi_full.to_csv(rsi_full_nd, index=False)
+    rsi_full.rename(columns={"date_trans": "date_trans_ext"}, inplace=True)
+    rsi_full.drop_duplicates(subset=["property_id", "date"], inplace=True)
 
-    # # Load and clean experiments data
-    # experiments = pd.read_stata(f"{clean}/experiments.dta")
-    # experiments = experiments[experiments["did_rsi"].notna()]
-    # experiments = experiments[["property_id", "year", "whb_duration"]]
-    # experiments.rename(columns={"year": "experiment_year", "whb_duration": "experiment_duration"}, inplace=True)
-    # experiments.drop_duplicates(subset=["property_id"], inplace=True)
-    # experiments.to_stata(f"{working}/pids.dta", write_index=False)
+    # Load and clean experiments data
+    experiments = pd.read_pickle(os.path.join(data_folder, "clean", "experiments.p"))
+    experiments.drop(experiments[experiments.did_rsi.isna()].index, inplace=True)
+    experiments = experiments[["property_id", "year", "whb_duration"]]
+    experiments.rename(
+        columns={"year": "experiment_year", "whb_duration": "experiment_duration"},
+        inplace=True,
+    )
+    experiments.drop_duplicates(subset=["property_id"], inplace=True)
 
-    # # Merge leasehold flats with experiments
-    # leasehold_flats = pd.read_stata(f"{clean}/leasehold_flats.dta")
-    # merged = leasehold_flats.merge(experiments, on="property_id", how="inner")
-    # merged = merged[~((merged["year"] == merged["L_year"]) & (merged["quarter"] == merged["L_quarter"]))]
+    # Merge leasehold flats with experiments
+    leasehold_flats = pd.read_pickle(
+        os.path.join(data_folder, "clean", "leasehold_flats.p")
+    )
+    merged = leasehold_flats.merge(experiments, on="property_id", how="inner")
+    merged.drop(
+        merged[
+            (merged.year == merged.L_year) & (merged.quarter == merged.L_quarter)
+        ].index,
+        inplace=True,
+    )
 
-    # # Drop properties with multiple extensions
-    # if "multiple_extensions" in merged.columns:
-    #     merged = merged[~merged["multiple_extensions"]]
+    # Drop properties with multiple extensions
+    merged.drop(merged[merged.multiple_extensions].index, inplace=True)
 
-    # # Create date variable
-    # merged["date"] = merged["year"] * 4 + merged["quarter"]
+    # Create date variable
+    merged["date"] = merged["year"] * 4 + merged["quarter"]
 
-    # # Merge with rsi_full_nd
-    # rsi_full_nd_df = pd.read_csv(rsi_full_nd)
-    # merged = merged.merge(rsi_full_nd_df, on=["property_id", "date"], how="inner")
+    # Merge with rsi_full
+    merged = merged.merge(rsi_full, on=["property_id", "date"], how="inner")
+    merged.loc[~merged.extension, "extension_amount"] = np.nan
+    merged["extension_amount"] = merged.groupby("property_id")[
+        "extension_amount"
+    ].transform("mean")
 
-    # # Replace extension_amount
-    # merged["extension_amount"] = merged.apply(
-    #     lambda row: None if not row["extension"] else row["extension_amount"],
-    #     axis=1,
-    # )
-    # merged["extension_amount"] = merged.groupby("property_id")["extension_amount"].transform(
-    #     lambda x: x.fillna(x.mean())
-    # )
-
-    # # Save final dataset
-    # merged.to_stata(f"{working}/for_event_study.dta", write_index=False)
+    # Save final dataset
+    merged.to_pickle(os.path.join(data_folder, "working", "for_event_study.p"))
 
 
 def calculate_housing_risk_premium(data_folder):
@@ -474,13 +473,239 @@ def calculate_housing_risk_premium(data_folder):
     final_data.to_stata("$clean/risk_premium.dta", write_index=False)
 
 
+def get_gdp(data_folder):
+    gdp_path = os.path.join(data_folder, "raw", "oecd", "gdp.csv")
+    gdp_df = pd.read_csv(gdp_path)
+    gdp_df.columns = gdp_df.columns.str.lower()
+    gdp_df = gdp_df[
+        (gdp_df["measure"] == "MLN_USD")
+        & (gdp_df["time"] >= 2010)
+        & (gdp_df["time"] <= 2020)
+    ]
+    gdp_df = (
+        gdp_df.groupby("location", as_index=False)["value"]
+        .sum()
+        .rename(columns={"value": "gdp", "location": "iso"})
+    )
+    return gdp_df
+
+
 def global_forward_rates(data_folder):
-    return
+    gdp_df = get_gdp(data_folder)
+
+    # Load 10 Year Rate data
+    rate10y_info_path = os.path.join(
+        data_folder, "raw", "global_financial_data", "rate10yr.xlsx"
+    )
+    info_df = pd.read_excel(rate10y_info_path, sheet_name="Data Information")
+    info_df = info_df[["Ticker", "Country"]]
+
+    rate10y_data_path = os.path.join(
+        data_folder, "raw", "global_financial_data", "rate10yr.xlsx"
+    )
+    data_df = pd.read_excel(rate10y_data_path, sheet_name="Price Data")
+    data_df = data_df.merge(info_df, on="Ticker", how="left")
+    data_df = data_df.rename(columns={"Close": "rate10y"})
+
+    # Load 30 Year Rate data
+    rate30y_info_path = os.path.join(
+        data_folder, "raw", "global_financial_data", "rate30yr.xlsx"
+    )
+    info_df = pd.read_excel(rate30y_info_path, sheet_name="Data Information")
+    info_df = info_df[["Ticker", "Country"]]
+
+    rate30y_data_path = os.path.join(
+        data_folder, "raw", "global_financial_data", "rate30yr.xlsx"
+    )
+    data30_df = pd.read_excel(rate30y_data_path, sheet_name="Price Data")
+    data30_df = data30_df.merge(info_df, on="Ticker", how="left")
+    data30_df = data30_df.rename(columns={"Close": "rate30y"})
+
+    # Merge 10 Year and 30 Year data
+    data_df = data_df.merge(data30_df, on=["Date", "Country"], how="inner")
+    data_df["date"] = pd.to_datetime(data_df["Date"], format="%m/%d/%Y")
+    data_df = data_df.rename(columns={"Country": "country"})
+    data_df = data_df[["country", "date", "rate10y", "rate30y"]]
+    data_df = data_df.sort_values(["country", "date"])
+    data_df["year"] = data_df["date"].dt.year
+    data_df["quarter"] = data_df["date"].dt.quarter
+    data_df["rate30y"] = data_df["rate30y"] / 100
+    data_df["rate10y"] = data_df["rate10y"] / 100
+    data_df["rate10y20"] = 100 * (
+        (((1 + data_df["rate30y"]) ** 30) / ((1 + data_df["rate10y"]) ** 10))
+        ** (1 / 20)
+        - 1
+    )
+    data_df = data_df.dropna(subset=["rate10y20"])
+
+    # Merge with ISO codes
+    iso_codes_path = os.path.join(
+        data_folder, "raw", "global_financial_data", "iso_codes.dta"
+    )
+    iso_codes_df = pd.read_stata(iso_codes_path)
+    data_df = data_df.merge(iso_codes_df, on="country", how="left")
+    data_df = data_df.merge(gdp_df, on="iso", how="inner")
+
+    # Keep countries with data in every year
+    unique_isos = data_df["iso"].unique()
+    for iso in unique_isos:
+        for year in range(2003, 2024):
+            if data_df[(data_df["year"] == year) & (data_df["iso"] == iso)].empty:
+                data_df = data_df[data_df["iso"] != iso]
+
+    # Aggregate data and save the results
+    aggregated_df = (
+        data_df.groupby(["year"])
+        .apply(
+            lambda x: pd.DataFrame(
+                {
+                    "rate10y20": np.average(x["rate10y20"], weights=x["gdp"]),
+                    "date": x["date"].iloc[0],
+                },
+                index=[0],
+            )
+        )
+        .reset_index(drop=True)
+    )
+
+    output_path = os.path.join(data_folder, "working", "global_forward.p")
+    aggregated_df.to_pickle(output_path)
 
 
 def global_rtp(data_folder):
-    return
+    house_prices_path = os.path.join(data_folder, "raw", "oecd", "house_prices.csv")
+    house_prices_df = pd.read_csv(house_prices_path)
+    house_prices_df.columns = house_prices_df.columns.str.lower()
+
+    # Filter and process the data
+    house_prices_df = house_prices_df[
+        (house_prices_df["frequency"] == "Q")
+        & (house_prices_df["subject"] == "PRICERENT")
+    ]
+
+    def parse_quarterly_date(quarter_str):
+        year, quarter = quarter_str.split("-Q")
+        return pd.Timestamp(year=int(year), month=int(quarter) * 3, day=1)
+
+    house_prices_df["date"] = house_prices_df["time"].apply(parse_quarterly_date)
+
+    house_prices_df["rent_price"] = 100 * (1 / (house_prices_df["value"] / 100))
+    house_prices_df = house_prices_df[["date", "rent_price", "location"]]
+    house_prices_df = house_prices_df.rename(columns={"location": "iso"})
+
+    # Extract year from date
+    house_prices_df["year"] = house_prices_df["date"].dt.year
+    house_prices_df = house_prices_df.groupby(["year", "iso"], as_index=False)[
+        "rent_price"
+    ].mean()
+
+    # Keep countries with data in every year of the sample
+    unique_isos = house_prices_df["iso"].unique()
+    for iso in unique_isos:
+        for year in range(2003, 2024):
+            if house_prices_df[
+                (house_prices_df["year"] == year) & (house_prices_df["iso"] == iso)
+            ].empty:
+                print(f"Dropping {iso}")
+                house_prices_df = house_prices_df[house_prices_df["iso"] != iso]
+
+    # Load GDP data
+    gdp_df = get_gdp(data_folder)
+    house_prices_df = house_prices_df.merge(gdp_df, on="iso", how="inner")
+
+    # Drop rows where iso is OECD
+    house_prices_df = house_prices_df[house_prices_df["iso"] != "OECD"]
+
+    # Save UK-specific data
+    uk_rtp_path = os.path.join(data_folder, "working", "uk_rtp.p")
+    uk_df = house_prices_df[house_prices_df["iso"] == "GBR"][
+        ["rent_price", "year"]
+    ].rename(columns={"rent_price": "rent_price_uk"})
+    uk_df.to_pickle(uk_rtp_path)
+
+    # Aggregate rent_price globally weighted by GDP
+    global_rtp_path = os.path.join(data_folder, "working", "global_rtp.p")
+    global_rtp_df = (
+        house_prices_df.groupby("year")
+        .apply(
+            lambda x: pd.DataFrame(
+                {"rent_price": np.average(x["rent_price"], weights=x["gdp"])}, index=[0]
+            )
+        )
+        .reset_index(drop=True)
+    )
+    global_rtp_df = global_rtp_df.rename(columns={"rent_price": "rent_price_global"})
+    global_rtp_df["year"] = global_rtp_df.index
+    global_rtp_df.to_pickle(global_rtp_path)
 
 
 def rightmove_desriptions(data_folder):
-    return
+    descriptions_path = os.path.join(
+        data_folder, "working", "rightmove_descriptions.dta"
+    )
+    descriptions_df = pd.read_stata(descriptions_path)
+    for col in descriptions_df.select_dtypes(include=["object"]):
+        descriptions_df[col] = (
+            descriptions_df[col].str.replace(r"\\t", "", regex=True).str.strip()
+        )
+
+    # Merge with rightmove_merge_keys
+    merge_keys_path = os.path.join(data_folder, "working", "rightmove_merge_keys.p")
+    merge_keys_df = pd.read_pickle(merge_keys_path)
+    descriptions_df = descriptions_df.merge(
+        merge_keys_df, on="property_id_rm", how="inner"
+    )
+
+    # Clean and process summary column
+    descriptions_df["summary"] = descriptions_df["summary"].str.strip().str.upper()
+    descriptions_df = descriptions_df.dropna(subset=["summary"])
+
+    # Keep relevant columns
+    descriptions_df = descriptions_df[["property_id", "date_rm", "summary"]]
+
+    # Create 'renovated' column
+    renovation_keywords = [
+        "RENOVATED",
+        "REFURBISHED",
+        "UPDATED",
+        "IMPROVED",
+        "NEWLY BUILT",
+        "NEW BEDROOM",
+        "NEW BATHROOM",
+        "NEW KITCHEN",
+    ]
+    descriptions_df["renovated"] = (
+        descriptions_df["summary"]
+        .apply(lambda x: any(keyword in x for keyword in renovation_keywords))
+        .astype(int)
+    )
+
+    # Collapse to max(renovated) by property_id and date_rm
+    descriptions_collapsed = descriptions_df.groupby(
+        ["property_id", "date_rm"], as_index=False
+    ).agg({"renovated": "max"})
+
+    # Load leasehold_flats
+    leasehold_path = os.path.join(data_folder, "clean", "leasehold_flats.p")
+    leasehold_df = pd.read_pickle(leasehold_path)
+
+    # Join leasehold_flats with descriptions
+    merged_df = leasehold_df.merge(
+        descriptions_collapsed, on="property_id", how="inner"
+    )
+
+    # Calculate time difference
+    merged_df["d"] = (merged_df["date_trans"] - merged_df["date_rm"]).dt.days
+
+    # Filter listings within 2 years of transaction
+    merged_df = merged_df[merged_df["d"].abs() < 365 * 2]
+
+    # Keep closest listing to transaction time
+    merged_df["mind"] = merged_df.groupby(["property_id", "date_trans"])["d"].transform(
+        "min"
+    )
+    merged_df = merged_df[merged_df["d"] == merged_df["mind"]]
+
+    # Save renovations data
+    renovations_path = os.path.join(data_folder, "working", "renovations.p")
+    merged_df.to_pickle(renovations_path)

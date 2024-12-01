@@ -254,7 +254,7 @@ def apply_rsi_residuals(
     dfs = [pd.DataFrame()]
     for row in extensions.itertuples():
         controls, dates, text, radius = restrict_data(row, control_dict, radii=radii)
-        if not dates:
+        if not dates or len(controls) <= 2:
             continue
 
         dummy_vars = [f"d_{date}" for i, date in enumerate(dates) if i != 0]
@@ -273,7 +273,7 @@ def apply_rsi_full(
     extensions,
     control_dict,
     price_var="d_log_price",
-    case_shiller=False,
+    case_shiller=True,
     connect_all=False,
     add_constant=True,
     radii=[0.1, 0.5] + [i for i in range(1, 21)],
@@ -294,12 +294,12 @@ def apply_rsi_full(
         controls, dates, text, radius = restrict_data(
             row, control_dict, radii=radii, connect_all=connect_all
         )
-        if not dates:
+        if not dates or len(controls) <= 2:
             continue
 
         dummy_vars = [f"d_{date}" for i, date in enumerate(dates) if i != 0]
         params, se, constant, summary = rsi(
-            controls, dummy_vars=dummy_vars, get_se=True
+            controls, dummy_vars=dummy_vars, get_se=True, add_constant=add_constant
         )
         N = len(controls)
 
@@ -481,7 +481,6 @@ def restrict_columns(df):
             "L_quarter",
             "years_held",
             "d_log_price",
-            "d_pres_linear",
             "area",
             "postcode",
             "extension",
@@ -498,8 +497,8 @@ def restrict_columns(df):
     return df
 
 
-def load_data(folder, restrict_cols=True):
-    df = pd.read_pickle(os.path.join(folder, "clean", "leasehold_flats.p"))
+def load_data(folder, restrict_cols=True, filepath="clean/leasehold_flats_lw.p"):
+    df = pd.read_pickle(os.path.join(folder, filepath))
 
     # Drop impossible controls
     len_df = len(df)
@@ -611,7 +610,7 @@ def get_residuals(
 
     df = load_data(data_folder)
     df.drop(df[df.years_held < 2].index, inplace=True)
-    df = df[df.area.str.startswith("B")]
+    # df = df[df.area=='B'].copy()
 
     local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
     print(
@@ -629,51 +628,35 @@ def get_residuals(
     )
     print("Residuals:", residuals, "\n=========")
 
-    residuals_gather = comm.gather(residuals, root=0)
-    if rank == 0:
-        file = os.path.join(data_folder, "working", "residuals.p")
-        combined_residuals = pd.concat(residuals_gather)
-        combined_residuals.to_pickle(file)
+    # Save into distinct files
+    file = os.path.join(data_folder, f"working/residuals/residuals_{rank}.p")
+    residuals.to_pickle(file)
 
-
-def get_rent_rsi(data_folder, start_date=1995, end_date=2024):
-    file = os.path.join(data_folder, "working", "for_rent_rsi.p")
-    df = pd.read_csv(file)
-
-    df["date"] = df["year_rm"]
-    df["L_date"] = df["L_year_rm"]
-    df = df[~df["L_date"].isna()]
-    df = df[df["date"] != df["L_date"]]
-
-    extensions, controls = get_local_extensions_controls(df, 0, 1)
-
-    rsi = get_rsi(
-        extensions,
-        controls,
-        start_date=start_date,
-        end_date=end_date,
-        case_shiller=False,
-        add_constant=True,
-        price_var="d_log_rent_res",
-    )
-
-    file = os.path.join(data_folder, "working", "rsi_rent.p")
-    rsi.to_pickle(file)
+    # residuals_gather = comm.gather(residuals, root=0)
+    # if rank == 0:
+    #     file = os.path.join(data_folder, "working", "residuals.p")
+    #     combined_residuals = pd.concat(residuals_gather)
+    #     combined_residuals.to_pickle(file)
 
 
 def construct_rsi(
-    data_folder, start_year=1995, start_month=1, end_year=2024, end_month=1, n_jobs=16
+    data_folder,
+    start_year=1995,
+    start_quarter=1,
+    end_year=2024,
+    end_quarter=1,
+    n_jobs=16,
 ):
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
 
-    start_date = start_year * 4 + start_month
-    end_date = end_year * 4 + end_month
+    start_date = start_year * 4 + start_quarter
+    end_date = end_year * 4 + end_quarter
 
     df = load_data(data_folder)
-    # df = df[df.area.str.startswith('B')]
+    df = df[df.area.str.startswith("B")]
 
     # Get weights
     print("Getting residuals")
@@ -685,55 +668,65 @@ def construct_rsi(
         f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
     )
 
-    # # Get RSI - including flippers
-    # print("Getting RSI with flippers")
-    # rsi_flip = get_rsi(
-    #     local_extensions,
-    #     local_controls,
-    #     start_date=start_date,
-    #     end_date=end_date,
-    #     case_shiller=True,
-    # )
-    # rsi_flip_gather = comm.gather(rsi_flip, root=0)
+    # Get RSI - including flippers
+    print("Getting RSI with flippers")
+    rsi_flip = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=True,
+    )
+    rsi_flip_gather = comm.gather(rsi_flip, root=0)
 
-    # RSI - excluding flippers (Baseline Method)
+    # RSI (Baseline Method)
     print("Getting baseline RSI")
     df.drop(df[df.years_held < 2].index, inplace=True)
     local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
-    # rsi = get_rsi(
-    #     local_extensions,
-    #     local_controls,
-    #     start_date=start_date,
-    #     end_date=end_date,
-    #     case_shiller=True,
-    # )
-    # rsi_gather = comm.gather(rsi, root=0)
-
-    # # Hedonics variation
-    print("Hedonics variation")
     rsi = get_rsi(
         local_extensions,
         local_controls,
         start_date=start_date,
         end_date=end_date,
         case_shiller=True,
-        price_var="d_pres_linear",
     )
-    rsi_hedonics_gather = comm.gather(rsi, root=0)
+    rsi_gather = comm.gather(rsi, root=0)
+
+    # Full RSI
+    rsi_full = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=True,
+        func=apply_rsi_full,
+    )
+    rsi_full_gather = comm.gather(rsi_full, root=0)
+
+    # # Hedonics variation
+    rsi_hedonics = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=True,
+        price_var="d_pres_main",
+    )
+    rsi_hedonics_gather = comm.gather(rsi_hedonics, root=0)
 
     # # No weights
-    # print("Getting BMN RSI")
-    # print(f"Num cores: {os.cpu_count()}")
-    # rsi_bmn = get_rsi(
-    #     local_extensions,
-    #     local_controls,
-    #     start_date=start_date,
-    #     end_date=end_date,
-    #     case_shiller=False,
-    # )
-    # rsi_bmn_gather = comm.gather(rsi_bmn, root=0)
+    print("Getting BMN RSI")
+    print(f"Num cores: {os.cpu_count()}")
+    rsi_bmn = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=False,
+    )
+    rsi_bmn_gather = comm.gather(rsi_bmn, root=0)
 
-    # # Yearly
+    # # # Yearly
     # print("Getting annual RSI")
     # df["date"] = df["year"]
     # df["L_date"] = df["L_year"]
@@ -763,29 +756,33 @@ def construct_rsi(
 
     if rank == 0:
 
-        #     file = os.path.join(data_folder, "working", "rsi_flip.p")
-        #     combined_rsi = pd.concat(rsi_flip_gather)
-        #     combined_rsi.to_pickle(file)
+        file = os.path.join(data_folder, "working", "rsi_flip.p")
+        combined_rsi = pd.concat(rsi_flip_gather)
+        combined_rsi.to_pickle(file)
 
-        #     file = os.path.join(data_folder, "working", "rsi.p")
-        #     combined_rsi = pd.concat(rsi_gather)
-        #     combined_rsi.to_pickle(file)
+        file = os.path.join(data_folder, "working", "rsi.p")
+        combined_rsi = pd.concat(rsi_gather)
+        combined_rsi.to_pickle(file)
 
         file = os.path.join(data_folder, "working", "rsi_hedonics.p")
         combined_rsi = pd.concat(rsi_hedonics_gather)
         combined_rsi.to_pickle(file)
 
-    #     file = os.path.join(data_folder, "working", "rsi_bmn.p")
-    #     combined_rsi = pd.concat(rsi_bmn_gather)
-    #     combined_rsi.to_pickle(file)
+        file = os.path.join(data_folder, "working", "rsi_full.p")
+        combined_rsi = pd.concat(rsi_full_gather)
+        combined_rsi.to_pickle(file)
 
-    #     file = os.path.join(data_folder, "working", "rsi_yearly.p")
-    #     combined_rsi = pd.concat(rsi_yearly_gather)
-    #     combined_rsi.to_pickle(file)
+        file = os.path.join(data_folder, "working", "rsi_bmn.p")
+        combined_rsi = pd.concat(rsi_bmn_gather)
+        combined_rsi.to_pickle(file)
 
-    #    file = os.path.join(data_folder, "working", "rsi_postcode.p")
-    #    combined_rsi = pd.concat(rsi_postcode_gather)
-    #    combined_rsi.to_pickle(file)
+        # file = os.path.join(data_folder, "working", "rsi_yearly.p")
+        # combined_rsi = pd.concat(rsi_yearly_gather)
+        # combined_rsi.to_pickle(file)
+
+        # file = os.path.join(data_folder, "working", "rsi_postcode.p")
+        # combined_rsi = pd.concat(rsi_postcode_gather)
+        # combined_rsi.to_pickle(file)
 
 
 def update_rsi(

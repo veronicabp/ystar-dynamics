@@ -1,8 +1,8 @@
 # %%
 from clean.price_paid import clean_price_paid
 from clean.leases import clean_leases
-from clean.merge_hmlr import merge_hmlr
-from clean.rsi import construct_rsi
+from clean.merge_hmlr import merge_hmlr, convert_hedonics_data
+from clean.rsi import construct_rsi, get_residuals
 from clean.bootstrap_rsi import bootstrap_rsi
 from clean.finalize_experiments import run_create_experiments
 from analysis.compile_bootstrap import compile_bootstrap
@@ -21,18 +21,24 @@ if __name__ == "__main__":
     # clean_leases(data_folder)
 
     # Merge new data
-    merge_hmlr(data_folder)
+    # convert_hedonics_data(data_folder)
+    # merge_hmlr(data_folder)
 
     # Create RSI
+    # get_residuals(data_folder)
     # construct_rsi(data_folder)
+    # construct_restrictive_controls(data_folder)
+    # get_rsi_hedonic_variations(data_folder)
     # bootstrap_rsi(data_folder)
 
     # Finalize experiments
     # run_create_experiments(data_folder)
 
-    # Create timeseries
-
-    # Analysis
+    # Additional datasets
+    # make_additional_datasets(data_folder)
+    # construct_rent_rsi(data_folder)
+    # construct_hazard_rate(data_folder)
+    # get_cross_sectional_estimates(data_folder)
     # compile_bootstrap(data_folder)
 
     end = time.time()
