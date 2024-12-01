@@ -4,11 +4,16 @@ import pandas as pd
 import numpy as np
 
 import dask.dataframe as dd
-from dask.distributed import Client, progress
+
+# from dask_jobqueue import SLURMCluster
+from dask.distributed import Client, LocalCluster, progress
 from dask.diagnostics import ProgressBar
+import dask.dataframe as dd
 from dask import delayed, compute
 from pqdm.processes import pqdm
 from multiprocessing import Pool, cpu_count
+from mpi4py import MPI
+import swifter
 
 from tqdm import tqdm
 
@@ -17,12 +22,15 @@ import re
 import sys
 import time
 import csv
+import json
 from math import ceil
 
 from word2number import w2n
 from textblob import TextBlob
 from dateutil.parser import parse
 from spellchecker import SpellChecker
+from collections import defaultdict
+from itertools import combinations
 
 import pickle
 
@@ -30,6 +38,10 @@ import statsmodels.api as sm
 from sklearn.utils import resample
 from scipy.optimize import curve_fit
 from scipy.optimize import least_squares
+from linearmodels.iv.absorbing import AbsorbingLS
+from statsmodels.tsa.api import VAR
+
+# from memory_profiler import profile
 
 import warnings
 
@@ -44,7 +56,28 @@ tqdm.pandas()
 pd.set_option("future.no_silent_downcasting", True)
 
 n_jobs = int(os.cpu_count()) - 2
-hedonics_rm = ["bedrooms", "floorarea", "bathrooms", "livingrooms", "yearbuilt"]
+hedonics_rm_full = [
+    "bedrooms",
+    "bathrooms",
+    "floorarea",
+    "yearbuilt",
+    "livingrooms",
+    "parking",
+    "heatingtype",
+    "condition",
+]
+hedonics_rm = [
+    "bedrooms",
+    "bathrooms",
+    "floorarea",
+    "yearbuilt",
+]
+hedonics_zoop = [
+    "bedrooms_zoop",
+    "bathrooms_zoop",
+    "floors",
+    "receptions",
+]
 
 # Connect to Dask scheduler on the main node (change to scheduler address if needed)
 # client = Client("tcp://$(hostname -s):8786")  # This uses the SLURM main node
@@ -212,6 +245,40 @@ def estimate_ystar(df, lhs_var="did_rsi"):
     ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
 
     return ystar_estimate, ystar_std_error
+
+
+def residualize(df_full, dependent_var, indep_vars, absorb_vars, residual_name):
+    """
+    Runs an OLS regression with fixed effects (absorbed variables), computes residuals,
+    and adjusts them by adding back the mean of the dependent variable.
+
+    Parameters:
+    - df: pandas DataFrame containing the data.
+    - dependent_var: string, name of the dependent variable.
+    - absorb_vars: list of strings, names of variables to absorb (fixed effects).
+    - residual_name: string, name of the residuals column to be created in df.
+    """
+
+    df = df_full.dropna(subset=[dependent_var] + indep_vars + absorb_vars)
+
+    y = df[dependent_var]
+    X = sm.add_constant(df[indep_vars])
+    absorb_df = df[absorb_vars].copy()
+
+    for var in absorb_vars:
+        if absorb_df[var].dtype.name != "category":
+            absorb_df[var] = absorb_df[var].astype("category")
+
+    if len(absorb_vars) > 0:
+        model = AbsorbingLS(y, X, absorb=absorb_df)
+        res = model.fit()
+        df_full[residual_name] = res.resids + y.mean()
+    else:
+        model = sm.OLS(y, X)
+        res = model.fit()
+        df_full[residual_name] = res.resid + y.mean()
+
+    return df_full
 
 
 # %%

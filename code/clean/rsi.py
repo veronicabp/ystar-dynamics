@@ -34,7 +34,7 @@ def restrict_data(
     radii=[0.1, 0.5] + [i for i in range(1, 21)],
 ):
     # start = time.time()
-    # text += f"\n\n\n\n\nFinding controls for {row.property_id}, purchased in {row.L_date_trans} and sold in {row.date_trans} (dur2023={np.round(row.duration2023)})\n"
+    text += f"\n\n\n\n\nFinding controls for {row.property_id}, purchased in {row.L_date_trans} and sold in {row.date_trans} (dur2023={np.round(row.duration2023)})\n"
 
     # Restrict duration
     controls = control_dict[row.duration2023]
@@ -55,7 +55,7 @@ def restrict_data(
         axis=1,
     )
 
-    # text += f"Full controls:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
+    text += f"Full controls:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
 
     # Choose smallest distance such that the dates are connected
     dates = None
@@ -83,23 +83,27 @@ def restrict_data(
         if connected or (
             radius == radii[-1] and uf.are_connected(row.date, row.L_date)
         ):  # If we're at the max radius and the extension window dates are connected, build RSI for those dates
-            dates = sorted(uf.get_group(row.date))
+            dates_ = list(uf.get_group(row.date))
+            sub = sub[sub["date"].isin(dates_)]
+
             # Make sure number of observations is greater than number of parameters
-            sub = sub[sub["date"].isin(dates)]
-            if len(sub) > len(dates):
+            if len(sub) > len(dates_):
+                dates = sorted(dates_)
                 controls = sub
                 break
 
         elif len(sub) == len(controls):
+            text += f">>We matched all controls. No need to keep searching.\n\n"
             break
 
         # text += f"\nRADIUS TOO SMALL: {radius}\n"
         # text += f"\n{sub[['property_id','date','L_date','duration2023','distance']].head(50)}\n\n\n"
         # connected_dates = uf.build_groups()
         # for key in connected_dates:
-        # text += f"{key}: {sorted(connected_dates[key])}\n"
+        #     text += f"{key}: {sorted(connected_dates[key])}\n"
 
     # text += f"Restricted controls for radius {radius}:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
+    # text += f"Dates for which we are building RSI: {dates}"
     # print(text)
 
     # end = time.time()
@@ -205,9 +209,9 @@ def rsi_wrapper(
         params[dates.index(row["date"])] - params[dates.index(row["L_date"])] + constant
     )
 
-    # text += f"{summary}\n\n"
-    # text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row['d_log_price']} for treated"
-    # text += f'Radius = {radius}'
+    text += f"{summary}\n\n"
+    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row['d_log_price']} for treated"
+    text += f"Radius = {radius}"
     # print(text)
 
     N = len(controls)
@@ -386,7 +390,8 @@ def get_rsi(
     duration_margin=5,
     parallelize=True,
     groupby="area",
-    n_jobs=10,
+    n_jobs=16,
+    rank=1,
 ):
 
     for df in [extensions, controls]:
@@ -417,9 +422,12 @@ def get_rsi(
         controls_subgroup = controls_grouped[key]
         control_dict = {}
         for duration2023 in durations_list:
-            control_dict[duration2023] = controls_subgroup[
-                abs(controls_subgroup["duration2023"] - duration2023) <= duration_margin
-            ].copy()
+            control_dict[duration2023] = controls_subgroup.drop(
+                controls_subgroup[
+                    abs(controls_subgroup["duration2023"] - duration2023)
+                    > duration_margin
+                ].index
+            )
         chunks.append(
             (
                 group,
@@ -436,12 +444,14 @@ def get_rsi(
 
     results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
 
-    valid_results = [r for r in results if isinstance(r, (pd.DataFrame, pd.Series))]
+    valid_results = [pd.DataFrame()] + [
+        r for r in results if isinstance(r, (pd.DataFrame, pd.Series))
+    ]
     invalid_results = [
         r for r in results if not isinstance(r, (pd.DataFrame, pd.Series))
     ]
     if len(invalid_results) > 0:
-        print(f"Error! {invalid_results}")
+        print(f"[{rank}]: Error -- {invalid_results}")
 
     output = pd.concat(valid_results)
     return output
@@ -471,6 +481,7 @@ def restrict_columns(df):
             "L_quarter",
             "years_held",
             "d_log_price",
+            "d_pres_linear",
             "area",
             "postcode",
             "extension",
@@ -528,93 +539,253 @@ def get_extensions_controls(df):
 
     # print('\n\nExtensions:')
     # print(extensions)
-    print("Num extensions:", len(extensions))
+    # print("Num extensions:", len(extensions))
 
     # print('\n\nControls:')
     # print(controls)
-    print("Num controls:", len(controls))
+    # print("Num controls:", len(controls))
 
     return extensions, controls
 
 
-def construct_rsi(
-    data_folder, start_year=1995, start_month=1, end_year=2024, end_month=1
+def split_df_by_area(df, n_splits):
+    # Step 1: Initialize sub-dataframe containers and size trackers
+    splits = defaultdict(list)
+    current_sizes = [0] * n_splits  # Track sizes of each sub-df
+
+    # Step 2: Sort areas by their frequency in descending order
+    area_groups = df.groupby("area").size().reset_index(name="count")
+    area_groups = area_groups.sort_values(by="count", ascending=False)
+
+    # Step 3: Assign areas to sub-dataframes
+    for _, row in area_groups.iterrows():
+        area = row["area"]
+        area_count = row["count"]
+
+        # Check if the area count fits in the smallest split without splitting
+        min_index = current_sizes.index(min(current_sizes))
+        if area_count + current_sizes[min_index] <= len(df) // n_splits:
+            # Assign this entire area to the smallest split
+            splits[min_index].append(df[df["area"] == area])
+            current_sizes[min_index] += area_count
+        else:
+            # Split the area into smaller chunks across sub-dfs
+            area_df = df[df["area"] == area]
+            for i in range(0, area_count, len(df) // n_splits):
+                min_index = current_sizes.index(min(current_sizes))
+                chunk = area_df.iloc[i : i + len(df) // n_splits]
+                splits[min_index].append(chunk)
+                current_sizes[min_index] += len(chunk)
+
+    # Step 4: Concatenate each list of chunks into a sub-dataframe
+    sub_dfs = [pd.concat(splits[i], ignore_index=True) for i in range(n_splits)]
+
+    return sub_dfs
+
+
+def get_local_extensions_controls(df, rank, size):
+    extensions, controls = get_extensions_controls(df)
+    split = split_df_by_area(extensions, size)
+    local_extensions = split[rank]
+    local_controls = controls.drop(
+        controls[~controls.area.isin(local_extensions.area.unique())].index
+    )
+    return local_extensions, local_controls
+
+
+def get_residuals(
+    data_folder,
+    start_year=1995,
+    start_quarter=1,
+    end_year=2024,
+    end_quarter=1,
+    n_jobs=16,
 ):
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
+    start_date = start_year * 4 + start_quarter
+    end_date = end_year * 4 + end_quarter
+
+    df = load_data(data_folder)
+    df.drop(df[df.years_held < 2].index, inplace=True)
+    df = df[df.area.str.startswith("B")]
+
+    local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
+    print(
+        f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
+    )
+
+    # Get weights
+    print("Getting residuals")
+    residuals = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        func=apply_rsi_residuals,
+    )
+    print("Residuals:", residuals, "\n=========")
+
+    residuals_gather = comm.gather(residuals, root=0)
+    if rank == 0:
+        file = os.path.join(data_folder, "working", "residuals.p")
+        combined_residuals = pd.concat(residuals_gather)
+        combined_residuals.to_pickle(file)
+
+
+def get_rent_rsi(data_folder, start_date=1995, end_date=2024):
+    file = os.path.join(data_folder, "working", "for_rent_rsi.p")
+    df = pd.read_csv(file)
+
+    df["date"] = df["year_rm"]
+    df["L_date"] = df["L_year_rm"]
+    df = df[~df["L_date"].isna()]
+    df = df[df["date"] != df["L_date"]]
+
+    extensions, controls = get_local_extensions_controls(df, 0, 1)
+
+    rsi = get_rsi(
+        extensions,
+        controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=False,
+        add_constant=True,
+        price_var="d_log_rent_res",
+    )
+
+    file = os.path.join(data_folder, "working", "rsi_rent.p")
+    rsi.to_pickle(file)
+
+
+def construct_rsi(
+    data_folder, start_year=1995, start_month=1, end_year=2024, end_month=1, n_jobs=16
+):
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
 
     start_date = start_year * 4 + start_month
     end_date = end_year * 4 + end_month
 
     df = load_data(data_folder)
+    # df = df[df.area.str.startswith('B')]
 
-    # # Get weights
+    # Get weights
     print("Getting residuals")
-    # extensions, controls = get_extensions_controls(df.drop(df[df.years_held<2].index)):
-    # residuals = get_rsi(extensions, controls, start_date=start_date, end_date=end_date, func=apply_rsi_residuals)
-    # residuals.to_pickle(os.path.join(data_folder, 'working', 'residuals.p'))
-
     residuals = pd.read_pickle(os.path.join(data_folder, "working", "residuals.p"))
     df = add_weights(df, residuals)
 
-    # # Get RSI - including flippers
-    # print('Getting RSI with flippers')
-    # extensions, controls = get_extensions_controls(df)
-    # rsi = get_rsi(extensions, controls, start_date=start_date, end_date=end_date, case_shiller=True)
-    # rsi.to_pickle(os.path.join(data_folder, 'clean', 'rsi_flip.p'))
+    local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
+    print(
+        f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
+    )
 
-    # # RSI - excluding flippers (Baseline Method)
-    # print("Getting baseline RSI")
-    df.drop(df[df.years_held < 2].index, inplace=True)
-    extensions, controls = get_extensions_controls(df)
-    # rsi = get_rsi(
-    #     extensions,
-    #     controls,
+    # # Get RSI - including flippers
+    # print("Getting RSI with flippers")
+    # rsi_flip = get_rsi(
+    #     local_extensions,
+    #     local_controls,
     #     start_date=start_date,
     #     end_date=end_date,
     #     case_shiller=True,
     # )
-    # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi.p"))
+    # rsi_flip_gather = comm.gather(rsi_flip, root=0)
 
-    # Hedonics variation
+    # RSI - excluding flippers (Baseline Method)
+    print("Getting baseline RSI")
+    df.drop(df[df.years_held < 2].index, inplace=True)
+    local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
+    # rsi = get_rsi(
+    #     local_extensions,
+    #     local_controls,
+    #     start_date=start_date,
+    #     end_date=end_date,
+    #     case_shiller=True,
+    # )
+    # rsi_gather = comm.gather(rsi, root=0)
+
+    # # Hedonics variation
+    print("Hedonics variation")
+    rsi = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=True,
+        price_var="d_pres_linear",
+    )
+    rsi_hedonics_gather = comm.gather(rsi, root=0)
 
     # # No weights
     # print("Getting BMN RSI")
-    # print(f'Num cores: {os.cpu_count()}')
-    # rsi = get_rsi(
-    #     extensions,
-    #     controls,
+    # print(f"Num cores: {os.cpu_count()}")
+    # rsi_bmn = get_rsi(
+    #     local_extensions,
+    #     local_controls,
     #     start_date=start_date,
     #     end_date=end_date,
     #     case_shiller=False,
-    #     n_jobs=os.cpu_count()
     # )
-    # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_bmn.p"))
+    # rsi_bmn_gather = comm.gather(rsi_bmn, root=0)
 
     # # Yearly
-    print("Getting annual RSI")
-    df["date"] = df["year"]
-    df["L_date"] = df["L_year"]
-    df.drop(df[df.date == df.L_date].index, inplace=True)
-    extensions, controls = get_extensions_controls(df)
-    # rsi = get_rsi(
-    #     extensions,
-    #     controls,
+    # print("Getting annual RSI")
+    # df["date"] = df["year"]
+    # df["L_date"] = df["L_year"]
+    # df.drop(df[df.date == df.L_date].index, inplace=True)
+    # local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
+    # rsi_yearly = get_rsi(
+    #     local_extensions,
+    #     local_controls,
     #     start_date=start_year,
     #     end_date=end_year,
     #     case_shiller=True,
     # )
-    # rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_yearly.p"))
+    # rsi_yearly_gather = comm.gather(rsi_yearly, root=0)
 
-    # Postcode RSI
-    print("Postcode RSI:")
-    rsi = get_rsi(
-        extensions,
-        controls,
-        start_date=start_year,
-        end_date=end_year,
-        case_shiller=True,
-        groupby="postcode",
-    )
-    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi_postcode.p"))
+    # # Postcode RSI
+    # print("Postcode RSI:")
+
+    # rsi_postcode = get_rsi(
+    #     local_extensions,
+    #     local_controls,
+    #     start_date=start_year,
+    #     end_date=end_year,
+    #     case_shiller=True,
+    #     groupby="postcode",
+    # )
+    # rsi_postcode_gather = comm.gather(rsi_postcode, root=0)
+
+    if rank == 0:
+
+        #     file = os.path.join(data_folder, "working", "rsi_flip.p")
+        #     combined_rsi = pd.concat(rsi_flip_gather)
+        #     combined_rsi.to_pickle(file)
+
+        #     file = os.path.join(data_folder, "working", "rsi.p")
+        #     combined_rsi = pd.concat(rsi_gather)
+        #     combined_rsi.to_pickle(file)
+
+        file = os.path.join(data_folder, "working", "rsi_hedonics.p")
+        combined_rsi = pd.concat(rsi_hedonics_gather)
+        combined_rsi.to_pickle(file)
+
+    #     file = os.path.join(data_folder, "working", "rsi_bmn.p")
+    #     combined_rsi = pd.concat(rsi_bmn_gather)
+    #     combined_rsi.to_pickle(file)
+
+    #     file = os.path.join(data_folder, "working", "rsi_yearly.p")
+    #     combined_rsi = pd.concat(rsi_yearly_gather)
+    #     combined_rsi.to_pickle(file)
+
+    #    file = os.path.join(data_folder, "working", "rsi_postcode.p")
+    #    combined_rsi = pd.concat(rsi_postcode_gather)
+    #    combined_rsi.to_pickle(file)
 
 
 def update_rsi(

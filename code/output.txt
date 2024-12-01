@@ -1,0 +1,24 @@
+MAIN:
+        purchased_lease                   property_id  ... tpres125 tpres126
+2                 False                  6 1 SW19 5JU  ...      NaN      NaN
+3                  True                  1 56 SW6 7UF  ...      NaN      NaN
+9                  True                 3 61 SW15 3LF  ...      NaN      NaN
+21                 True                 B 101 SW7 4SS  ...      NaN      NaN
+25                 True                  C 6 SW1X 8RN  ...      NaN      NaN
+...                 ...                           ...  ...      ...      ...
+4911104           False                  95A SW18 5LU  ...      NaN      NaN
+4911184           False          9 CHARTWELL SW19 5LN  ...      NaN      NaN
+4911192           False     108 FULHAM ISLAND SW6 1DF  ...      NaN      NaN
+4911193           False  8 SOVEREIGN HOUSE 1 SW19 7PG  ...      NaN      NaN
+4911215           False                 30 5 SW15 2FJ  ...      NaN      NaN
+
+[304717 rows x 388 columns]
+Taking differences
+Num cols: 409
+Index(['purchased_lease', 'property_id', 'extension', 'date_trans',
+       'extension_amount', 'has_been_extended', 'log_price', 'price', 'uprn',
+       'year',
+       ...
+       'latitude', 'longitude', 'L_year', 'L_quarter', 'L_month', 'L_price',
+       'L_rent', 'L_duration', 'L_number_years', 'L_closed_lease'],
+      dtype='object', length=409)

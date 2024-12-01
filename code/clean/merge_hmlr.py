@@ -196,12 +196,16 @@ def merge_rightmove(hmlr_data, data_folder):
         exact_ids=["property_id", "uprn"],
         output_vars=["property_id_x", "property_id_y", "uprn_x", "uprn_y", "merged_on"],
     )
-    match = match.rename(
-        columns={"property_id_x": "property_id", "property_id_y": "property_id_rm"}
+    match.rename(
+        columns={"property_id_x": "property_id", "property_id_y": "property_id_rm"},
+        inplace=True,
     )
-    match = match[
-        (match.uprn_x == match.uprn_y) | (match.uprn_x.isna()) | (match.uprn_y.isna())
-    ]
+    match.drop(
+        match[
+            (match.uprn_x != match.uprn_y) & match.uprn_x.notna() & match.uprn_y.notna()
+        ].index,
+        inplace=True,
+    )
     match["uprn"] = np.where(
         match["uprn_x"].notnull(), match["uprn_x"], match["uprn_y"]
     )
@@ -242,47 +246,130 @@ def first_non_missing(series):
     return series.dropna().iloc[0] if not series.dropna().empty else np.nan
 
 
-# Function to process closest variables
-def process_closest_variable(df, vars_to_process, date_var_name):
+def get_closest_match(df, hedonic, hedonics_date_var):
+    merged = df[["date_trans", "property_id"]].merge(hedonic, on="property_id")
+
+    merged["date_diff"] = np.abs(
+        (merged["date_trans"] - merged[hedonics_date_var]).dt.total_seconds()
+    )
+    merged = merged.sort_values(["property_id", "date_trans", "date_diff"])
+    merged = merged.drop_duplicates(subset=["date_trans", "property_id"], keep="first")
+    merged.drop(["date_diff"], axis=1, inplace=True)
+    return merged
+
+
+def process_closest_variable(
+    df,
+    df_hedonics,
+    vars_to_process,
+    hedonics_date_var="date_rm",
+):
+    df.sort_values(by="date_trans", inplace=True)
+
     for var in vars_to_process:
         print(f"Processing variable: {var}")
-        # Calculate absolute difference in dates
-        df["diff"] = (df["date_trans"] - df[date_var_name]).abs()
-        # Get minimum difference per group
-        df["mindiff"] = df.groupby(["property_id", "date_trans"])["diff"].transform(
-            "min"
+
+        hedonic = df_hedonics.drop(df_hedonics[df_hedonics[var].isna()].index)[
+            ["property_id", hedonics_date_var, var]
+        ]
+
+        merged = get_closest_match(df, hedonic, hedonics_date_var)
+        merged.rename(
+            columns={hedonics_date_var: f"{hedonics_date_var}_{var}"}, inplace=True
         )
-        # Conditions where diff equals mindiff
-        condition = (df["diff"] == df["mindiff"]) & df["mindiff"].notna()
-        # Assign closest dates and variables
-        df.loc[condition, f"date_{var}_closest"] = df.loc[condition, date_var_name]
-        df.loc[condition, f"{var}_closest"] = df.loc[condition, var]
-        # Get first non-missing value per group
-        df[f"date_{var}_closest"] = df.groupby(["property_id", "date_trans"])[
-            f"date_{var}_closest"
-        ].transform(first_non_missing)
-        df[f"{var}_closest"] = df.groupby(["property_id", "date_trans"])[
-            f"{var}_closest"
-        ].transform(first_non_missing)
-        # Drop temporary columns
-        df.drop(["diff", "mindiff"], axis=1, inplace=True)
+
+        df = df.merge(merged, on=["property_id", "date_trans"], how="left")
+
     return df
 
 
-# Function to rename variables with a suffix
-def rename_variables_with_suffix(df, vars_to_rename, suffix):
-    rename_dict = {}
-    for var in vars_to_rename:
-        rename_dict[var] = f"{var}{suffix}"
-        rename_dict[f"date_{var}"] = f"date_{var}{suffix}"
-    df.rename(columns=rename_dict, inplace=True)
+def merge_hedonics_datasets(
+    data_folder,
+    df,
+    merge_keys,
+    hedonics_file="rightmove_rents_flats.p",
+    tag="rm",
+    hedonics_date_var="date_rm_rent",
+    rename_dict={
+        "listingid": "rentid",
+        "listingprice": "rent",
+        "date_rm": "date_rm_rent",
+    },
+    hedonics_vars=["bedrooms", "bathrooms"],
+):
+    hedonics = pd.read_pickle(os.path.join(data_folder, "working", hedonics_file))
+
+    hedonics = hedonics.merge(
+        merge_keys[["property_id", f"property_id_{tag}"]],
+        on=f"property_id_{tag}",
+        how="inner",
+    )
+
+    hedonics.rename(
+        columns=rename_dict,
+        inplace=True,
+    )
+
+    df = process_closest_variable(df, hedonics, hedonics_vars, hedonics_date_var)
+
+    if "rent" in hedonics_file:
+        df.rename(columns={var: f"{var}_rent" for var in hedonics_vars}, inplace=True)
+
     return df
+
+
+def get_time_on_market(df, merge_keys, data_folder):
+    hedonics = pd.read_pickle(
+        os.path.join(data_folder, "working", "rightmove_sales_flats.p")
+    )
+
+    hedonics = hedonics.merge(
+        merge_keys[["property_id", f"property_id_rm"]],
+        on=f"property_id_rm",
+        how="inner",
+    )
+
+    merged = get_closest_match(df, hedonics, "date_rm")
+    merged["time_on_market"] = merged.datelist1 - merged.datelist0
+    merged["price_change_pct"] = (
+        100 * (merged.listprice1 - merged.listprice0) / merged.listprice0
+    )
+    df = df.merge(
+        merged[["property_id", "date_trans", "time_on_market", "price_change_pct"]],
+        on=["property_id", "date_trans"],
+        how="left",
+    )
+
+    return df
+
+
+def create_interactions(df, vars_list, interaction_var):
+    """
+    Creates interaction terms between each variable in vars_list and interaction_var.
+
+    Parameters:
+    - df: pandas DataFrame containing the data.
+    - vars_list: list of strings, names of variables to interact.
+    - interaction_var: string, name of the variable to interact with.
+
+    Returns:
+    - df: updated DataFrame with new interaction variables.
+    - new_vars: list of names of the new interaction variables.
+    """
+    new_vars = []
+    for var in vars_list:
+        new_var = f"{var}_{interaction_var}"
+        df[new_var] = df[var].astype(str) + "_" + df[interaction_var].astype(str)
+        df[new_var] = df[new_var].astype("category")
+        df.loc[(df[var].isna()) | (df[interaction_var].isna()), new_var] = np.nan
+        new_vars.append(new_var)
+    return df, new_vars
 
 
 def merge_with_hedonics(df, data_folder):
 
     # Get hedonics merge keys
-    df["address"] = df.progress_apply(
+    df["address"] = df.swifter.apply(
         lambda row: row.property_id.replace(row.postcode, "").strip(), axis=1
     )
     hmlr_for_merge = df[["uprn", "property_id", "postcode", "address"]].copy()
@@ -291,71 +378,261 @@ def merge_with_hedonics(df, data_folder):
     rm_keys = merge_rightmove(hmlr_for_merge, data_folder)
     zoopla_keys = merge_zoopla(hmlr_for_merge, data_folder)
 
+    # Save
+    rm_keys.to_pickle(os.path.join(data_folder, "working", "rightmove_merge_keys.p"))
+    zoopla_keys.to_pickle(os.path.join(data_folder, "working", "zoopla_merge_keys.p"))
+
     ###############################
     # Merge hedonics with HMLR data
     ###############################
-    hedonics_rm_full = [
-        "bedrooms",
-        "bathrooms",
-        "floorarea",
-        "yearbuilt",
-        "livingrooms",
-        "parking",
-        "heatingtype",
-        "condition",
-    ]
-    hedonics_rm = [
-        "bedrooms",
-        "bathrooms",
-        "floorarea",
-        "yearbuilt",
-    ]
-    hedonics_zoop = [
-        "bedrooms",
-        "bathrooms",
-        "floorarea",
-        "yearbuilt",
-        "livingrooms",
-        "parking",
-        "heatingtype",
-        "condition",
-    ]
 
-    # Merge Rightmove rents
-    rm_rents = pd.read_pickle(
-        os.path.join(data_folder, "working", "rightmove_rents_flats.p")
+    ####### Merge Rightmove rents
+    df = merge_hedonics_datasets(
+        data_folder,
+        df,
+        rm_keys,
+        hedonics_file="rightmove_rents_flats.p",
+        tag="rm",
+        hedonics_date_var="date_rm_rent",
+        rename_dict={
+            "listingid": "rentid",
+            "listingprice": "rent",
+            "date_rm": "date_rm_rent",
+        },
+        hedonics_vars=hedonics_rm_full + ["rent"],
     )
 
-    df = df.merge(
-        rm_keys[["property_id", "property_id_rm"]], on="property_id", how="left"
+    ###### Merge Rightmove hedonics
+    df = merge_hedonics_datasets(
+        data_folder,
+        df,
+        rm_keys,
+        hedonics_file="rightmove_sales_flats.p",
+        tag="rm",
+        hedonics_date_var="date_rm",
+        rename_dict=dict(),
+        hedonics_vars=hedonics_rm_full,
     )
-    df = df.merge(rm_rents, on="property_id_rm", how="left", suffixes=["", "_rmrent"])
 
-    # Drop and rename columns
-    df.drop(
-        ["listprice0", "listprice1", "datelist0", "datelist1"], axis=1, inplace=True
+    for var in hedonics_rm:
+        df.loc[df[var].isna(), f"date_rm_{var}"] = df[f"date_rm_rent_{var}"]
+        df.loc[df[var].isna(), var] = df[f"{var}_rent"]
+
+    ###### Merge Zoopla rents
+    df = merge_hedonics_datasets(
+        data_folder,
+        df,
+        zoopla_keys,
+        hedonics_file="zoopla_rents_flats.p",
+        tag="zoop",
+        hedonics_date_var="date_zoopla_rent",
+        rename_dict={
+            "price_zoopla": "rent_zoopla",
+            "date_zoopla": "date_zoopla_rent",
+        },
+        hedonics_vars=hedonics_zoop + ["rent_zoopla"],
     )
-    df.rename(columns={"listingid": "rentid", "listingprice": "rent"}, inplace=True)
 
-    # Process closest variables for Rightmove rents
-    df = process_closest_variable(df, hedonics_rm_full + ["rent"], "date_rm")
+    ##### Merge Zoopla hedonics
+    df = merge_hedonics_datasets(
+        data_folder,
+        df,
+        zoopla_keys,
+        hedonics_file="zoopla_sales_flats.p",
+        tag="zoop",
+        hedonics_date_var="date_zoopla",
+        rename_dict=dict(),
+        hedonics_vars=hedonics_zoop,
+    )
 
-    # Drop original variables and rename closest variables
-    df.drop(hedonics_rm_full + ["rent", "date_rm"], axis=1, inplace=True)
+    for var in hedonics_zoop:
+        df.loc[df[var].isna(), f"date_zoopla_{var}"] = df[f"date_zoopla_rent_{var}"]
+        df.loc[df[var].isna(), var] = df[f"{var}_rent"]
+
+    ##### Get time on market
+    df = get_time_on_market(df, rm_keys, data_folder)
+
+    ##### Other edits
     df.rename(
-        columns=lambda x: x.replace("_closest", "") if "_closest" in x else x,
+        columns={
+            "rent_rent": "rent",
+            "date_rm_rent_rent": "date_rm_rent",
+            "rent_zoopla_rent": "rent_zoop",
+            "date_zoopla_rent_rent_zoopla": "date_zoopla_rent_zoop",
+        },
         inplace=True,
     )
+    df["rent_zoop"] *= 52  # Annualize rent
 
-    # Remove duplicates
-    df.drop_duplicates(
-        subset=["property_id", "date_trans", "property_id_rm"], inplace=True
+    # Use zoopla if rightmove data is missing
+    df.rename(
+        columns={
+            var: var.replace("date_rm", "date")
+            for var in df.columns
+            if "date_rm" in var
+        },
+        inplace=True,
+    )
+    for var in ["bedrooms", "bathrooms", "rent"]:
+        df.loc[(df[var].isna()) | (df[var] == 0), f"date_{var}"] = df[
+            f"date_zoopla_{var}_zoop"
+        ]
+        df.loc[(df[var].isna()) | (df[var] == 0), var] = df[f"{var}_zoop"]
+
+    # Get property age
+    df["age"] = df.date_trans.dt.year - df.yearbuilt
+    df.loc[df.age < 0, "yearbuilt"] = np.nan
+    df.loc[df.age < 0, "age"] = np.nan
+
+    # Remove erroneous values
+    df.loc[(df.rent <= 100) | (df.rent > 0.7 * df.price), "rent"] = np.nan
+
+    df["bedrooms_z"] = df["bedrooms"].where(df["bedrooms"] <= 10)
+    df["bathrooms_z"] = df["bathrooms"].where(df["bathrooms"] <= 5)
+    df["log_rent"] = np.log(df["rent"])
+    df["log_rent100"] = 100 * df["log_rent"]
+
+    df["floorarea_50"] = pd.qcut(df["floorarea"], q=50, labels=False, duplicates="drop")
+    df["yearbuilt_50"] = pd.qcut(df["yearbuilt"], q=50, labels=False, duplicates="drop")
+    df["age_50"] = pd.qcut(df["age"], q=50, labels=False, duplicates="drop")
+
+    # Grouping with missing values treated as a separate category
+    for col in ["condition", "heatingtype", "parking"]:
+        df[f"{col}_n"] = df[col].astype("string").fillna("MISSING").astype("category")
+
+    # GMS-style hedonics
+    for col in ["bedrooms", "bathrooms", "livingrooms"]:
+        df[f"{col}_n"] = df[col]
+        df.loc[df[col].isnull() | (df[col] > 8), f"{col}_n"] = 99
+
+    df["floorarea_n"] = pd.qcut(
+        df["floorarea"], q=50, labels=False, duplicates="drop"
+    ).fillna(99)
+    df["age_n"] = pd.qcut(df["age"], q=50, labels=False, duplicates="drop").fillna(99)
+
+    # Residualize price on hedonics
+    for var in ["bedrooms", "bathrooms", "floorarea_50", "yearbuilt_50"]:
+        df = residualize(df, "log_price", [], [var], f"pres_{var}")
+
+    df = residualize(
+        df,
+        "log_price",
+        [],
+        ["bedrooms", "bathrooms", "floorarea_50", "yearbuilt_50"],
+        "pres_main",
+    )
+    df = residualize(
+        df,
+        "log_price",
+        [],
+        [
+            "bedrooms",
+            "bathrooms",
+            "floorarea_50",
+            "yearbuilt_50",
+            "condition",
+            "heatingtype",
+            "parking",
+        ],
+        "pres_all",
+    )
+    df = residualize(
+        df,
+        "log_price",
+        [],
+        [
+            "bedrooms_n",
+            "bathrooms_n",
+            "floorarea_n",
+            "age_n",
+            "condition_n",
+            "heatingtype_n",
+            "parking_n",
+        ],
+        "pres_all_gms",
     )
 
-    # Rename variables to prevent overwriting
-    df = rename_variables_with_suffix(df, hedonics_rm_full, "_rent")
+    # Linear controls
+    df = residualize(
+        df,
+        "log_price",
+        ["bedrooms", "floorarea"],
+        [],
+        "pres_linear",
+    )
+
+    # Quadratic controls
+    df["bedrooms2"] = df["bedrooms"] ** 2
+    df["floorarea2"] = df["floorarea"] ** 2
+    df = residualize(
+        df,
+        "log_price",
+        ["bedrooms", "floorarea", "bedrooms2", "floorarea2"],
+        [],
+        "pres_quad",
+    )
+    df.drop(["bedrooms2", "floorarea2"], axis=1, inplace=True)
+
+    # Interact with year FE
+    vars_list = ["bedrooms", "bathrooms", "floorarea_50", "yearbuilt_50"]
+    df, interaction_vars = create_interactions(df, vars_list, "year")
+    df = residualize(df, "log_price", [], interaction_vars, "tpres_main")
+
+    vars_list.extend(["condition", "heatingtype", "parking"])
+    df, interaction_vars = create_interactions(df, vars_list, "year")
+    df = residualize(df, "log_price", [], interaction_vars, "tpres_all")
+
+    vars_list = [
+        "bedrooms_n",
+        "bathrooms_n",
+        "floorarea_n",
+        "age_n",
+        "condition_n",
+        "heatingtype_n",
+        "parking_n",
+    ]
+    df, interaction_vars = create_interactions(df, vars_list, "year")
+    df = residualize(df, "log_price", [], interaction_vars, "tpres_all_gms")
+
+    # Generate all combinations of hedonic characteristics
+    varlist = [
+        "bedrooms",
+        "bathrooms",
+        "floorarea_50",
+        "yearbuilt_50",
+        "condition",
+        "heatingtype",
+        "parking",
+    ]
+
+    combs = get_combinations(varlist)
+    combs_time_interaction = get_combinations([f"{var}_year" for var in varlist])
+
+    for count, comb in enumerate(combs):
+        df = process_combination(df, comb, count).copy()
+
+    for count, comb in enumerate(combs_time_interaction):
+        df = process_combination(df, comb, count, name_prefix="tpres").copy()
 
     return df
+
+
+def get_combinations(varlist):
+    combinations_list = [
+        comb
+        for idx, comb in enumerate(
+            comb
+            for r in range(1, len(varlist) + 1)
+            for comb in combinations(varlist, r)
+        )
+    ]
+    return combinations_list
+
+
+def process_combination(df, comb, count, name_prefix="pres"):
+    residual_name = f"{name_prefix}{count}"
+    print(f"Processing combination {count}: {comb}")
+    return residualize(df, "log_price", [], list(comb), residual_name)
 
 
 def finalize_data(df, original_data_folder):
@@ -406,9 +683,20 @@ def finalize_data(df, original_data_folder):
             "longitude",
         ] = df.lon_rm
 
+    # Drop unnecessary dates
+    df.drop(
+        columns=[
+            col
+            for col in df.columns
+            if "date" in col and ("zoopla" in col or "_rent_" in col)
+        ],
+        inplace=True,
+    )
+
     # Take differences
+    print("Taking differences")
     df.sort_values(by=["property_id", "date_trans"], inplace=True)
-    for var in (
+    vars_to_process = (
         [
             "year",
             "quarter",
@@ -431,10 +719,22 @@ def finalize_data(df, original_data_folder):
             or col.startswith("uk")
         ]
         + hedonics_rm
-    ):
+    )
+
+    # Create all new columns in one go
+    new_columns = []
+    for var in tqdm(vars_to_process):
         if var in df.columns:
-            df[f"L_{var}"] = df.groupby("property_id")[var].shift(1)
-            df[f"d_{var}"] = df[var] - df[f"L_{var}"]
+            new_columns.append(
+                df.groupby("property_id")[var].shift(1).rename(f"L_{var}")
+            )
+            new_columns.append(
+                (df[var] - df.groupby("property_id")[var].shift(1)).rename(f"d_{var}")
+            )
+
+    # Concatenate all new columns at once
+    df = pd.concat([df] + new_columns, axis=1)
+    df = df.copy()
 
     df.rename(columns={"d_date_trans": "days_held"}, inplace=True)
     df["years_held"] = df.days_held.dt.days / 365.25
@@ -446,10 +746,11 @@ def finalize_data(df, original_data_folder):
     )
 
     # Identify extensions
+    print("Identifying Extensions")
     df["extension"] = (
         (df["duration"] - df["L_duration"] + df["years_held"] > 5)
-        & df["L_duration"].notna()
-        & df["duration"].notna()
+        & (~df["L_duration"].isna())
+        & (~df["duration"].isna())
     )
     df["extension_amount"] = np.where(
         df["extension"], df["duration"] - df["L_duration"] + df["years_held"], np.nan
@@ -465,7 +766,7 @@ def finalize_data(df, original_data_folder):
                 )
                 > 1
             )
-            & df["L_date_expired"].notna()
+            & (~df["L_date_expired"].isna())
         )
     ) & df["extension"]
 
@@ -495,9 +796,9 @@ def finalize_data(df, original_data_folder):
     df.loc[
         df["date_extended"] > df["date_trans"].dt.to_period("D"), "date_extended"
     ] = df["date_trans"].dt.to_period("D")
-    df.loc[df["has_been_extended"] & df["date_expired"].notna(), "date_extended"] = df[
-        "date_expired"
-    ]
+    df.loc[df["has_been_extended"] & (~df["date_expired"].isna()), "date_extended"] = (
+        df["date_expired"]
+    )
 
     # Drop impossible values
     df = df[
@@ -527,78 +828,93 @@ def finalize_data(df, original_data_folder):
 
 def merge_hmlr(data_folder):
 
-    # Merge open leases
-    price_data = pd.read_pickle(
-        os.path.join(data_folder, "working", "price_data_leaseholds.p")
-    )
-    lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
-    purchased_leases = pd.read_pickle(
-        os.path.join(data_folder, "working", "purchased_lease_data.p")
-    )
-    merge_keys = merge_wrapper(
-        get_price_for_merge(price_data.copy()), get_lease_for_merge(lease_data.copy())
-    )
+    # # Merge open leases
+    # price_data = pd.read_pickle(
+    #     os.path.join(data_folder, "working", "price_data_leaseholds.p")
+    # )
+    # lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
+    # purchased_leases = pd.read_pickle(
+    #     os.path.join(data_folder, "working", "purchased_lease_data.p")
+    # )
+    # merge_keys = merge_wrapper(
+    #     get_price_for_merge(price_data.copy()), get_lease_for_merge(lease_data.copy())
+    # )
 
-    # Merge closed leases
-    merged = merge_purchased_leases(price_data, purchased_leases)
+    # # Merge closed leases
+    # merged = merge_purchased_leases(price_data, purchased_leases)
 
-    # Merge with open leases
-    merged = merge_open_leases(merged, merge_keys, lease_data)
+    # # Merge with open leases
+    # merged = merge_open_leases(merged, merge_keys, lease_data)
 
-    # Identify extended leases
-    merged["has_been_extended"] = (
-        (merged.closed_lease)
-        & (
-            (merged.date_from.dt.year + merged.number_years)
-            - (merged.date_from_purch.dt.year + merged.number_years_purch)
-            > 30
-        )
-        & (~merged.date_from.isna())
-    )
-    merged.loc[merged.has_been_extended, "extension_amount"] = (
-        merged.date_from.dt.year + merged.number_years
-    ) - (merged.date_from_purch.dt.year + merged.number_years_purch)
+    # # Identify extended leases
+    # merged["has_been_extended"] = (
+    #     (merged.closed_lease)
+    #     & (
+    #         (merged.date_from.dt.year + merged.number_years)
+    #         - (merged.date_from_purch.dt.year + merged.number_years_purch)
+    #         > 30
+    #     )
+    #     & (~merged.date_from.isna())
+    # )
+    # merged.loc[merged.has_been_extended, "extension_amount"] = (
+    #     merged.date_from.dt.year + merged.number_years
+    # ) - (merged.date_from_purch.dt.year + merged.number_years_purch)
 
-    # Use purchased leases when available
-    for var in ["date_from", "number_years", "date_registered"]:
-        merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
-    merged.loc[merged.closed_lease, "date_registered"] = np.nan
+    # # Use purchased leases when available
+    # for var in ["date_from", "number_years", "date_registered"]:
+    #     merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
+    # merged.loc[merged.closed_lease, "date_registered"] = np.nan
 
-    # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
-    for var in ["date_from", "number_years"]:
-        merged["temp"] = np.where(
-            (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
-        )
-        merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
-            "temp"
-        ].transform("first")
-        merged.drop(columns="temp", inplace=True)
+    # # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
+    # for var in ["date_from", "number_years"]:
+    #     merged["temp"] = np.where(
+    #         (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
+    #     )
+    #     merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
+    #         "temp"
+    #     ].transform("first")
+    #     merged.drop(columns="temp", inplace=True)
 
-    merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
-    merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
+    # merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
+    # merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
 
-    # Append freeholds
-    freeholds = pd.read_pickle(
-        os.path.join(data_folder, "working", "price_data_freeholds.p")
-    )
-    merged = pd.concat([merged, freeholds])
+    # # Append freeholds
+    # freeholds = pd.read_pickle(
+    #     os.path.join(data_folder, "working", "price_data_freeholds.p")
+    # )
+    # merged = pd.concat([merged, freeholds])
 
-    merged = additional_cleaning(merged, data_folder)
-    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_all.p"))
+    # merged = additional_cleaning(merged, data_folder)
+    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_all.p"))
 
-    # Keep only flats for main data
-    merged.drop(merged[~merged.flat].index, inplace=True)
-    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
+    # # Keep only flats for main data
+    # merged.drop(merged[~merged.flat].index, inplace=True)
+    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
 
-    # Merge in hedonics data
+    # # Merge in hedonics data
     # merged = merge_with_hedonics(merged, data_folder)
+    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_hedonics.p"))
 
     # Finalize
-    merged = pd.read_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
-    final = finalize_data(merged, data_folder)
-    final.to_pickle(os.path.join(data_folder, "clean", "flats.p"))
+    print("Finalizing.")
+    merged = pd.read_pickle(
+        os.path.join(data_folder, "working", "merged_hmlr_hedonics.p")
+    )
 
-    final.drop(final[~final.leasehold].index, inplace=True)
+    l = len(merged)
+    merged.drop(merged[~merged.leasehold].index, inplace=True)
+    merged.drop(
+        columns=[
+            col
+            for col in merged.columns
+            if ("pres" in col or "tpres" in col)
+            and not ("pres_main" in col or "pres_linear" in col)
+        ],
+        inplace=True,
+    )
+    print(f"Dropped {len(merged)-l} freeholds.")
+
+    final = finalize_data(merged, data_folder)
     final.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
 
 

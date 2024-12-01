@@ -65,12 +65,12 @@ def create_experiments(df_main, rsi_dfs, data_folder):
         (df_main["L_date_trans"] - df_main["date_extended"].dt.to_timestamp()).dt.days
         / 365.25
     )
-    df_main["T5"] = df_main["T"].round(5)
-    df_main["T10"] = df_main["T"].round(10)
+    df_main["T5"] = df_main["T"].apply(lambda x: 5 * round(x / 5))
+    df_main["T10"] = df_main["T"].apply(lambda x: 10 * round(x / 10))
 
     # Generate variables
     df_main["k"] = df_main["extension_amount"]
-    df_main["k90"] = df_main["extension_amount"].round(5) == 90
+    df_main["k90"] = (df_main["k"].apply(lambda x: 5 * round(x / 5))) == 90
     df_main["k700p"] = df_main["extension_amount"] > 700
     df_main["k90u"] = (
         (df_main["extension_amount"] > 30)
@@ -163,6 +163,7 @@ def create_experiments(df_main, rsi_dfs, data_folder):
 
     return df_main, df_flip, df_public
 
+
 def run_create_experiments(data_folder):
     print("Creating experiments final dataset.")
     df = pd.read_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
@@ -171,11 +172,24 @@ def run_create_experiments(data_folder):
     rsi_dfs = []
     for tag in ["", "_bmn", "_yearly", "_postcode"]:
         print(f">Loading rsi{tag}")
-        rsi = pd.read_pickle(os.path.join(data_folder, "clean", f"rsi{tag}.p"))
+        rsi = pd.read_pickle(os.path.join(data_folder, "working", f"rsi{tag}.p"))
         rsi_clean = clean_rsi(rsi, tag)
         rsi_dfs.append(rsi_clean)
 
     df_main, df_flip, df_public = create_experiments(extensions, rsi_dfs, data_folder)
     df_main.to_pickle(os.path.join(data_folder, "clean", "experiments.p"))
+
+    for col in df_main.columns:
+        # Check if the column has an object dtype, which can cause issues with `to_stata`
+        if df_main[col].dtype == "object":
+            # Convert to string and handle NaN values
+            df_main[col] = df_main[col].astype(str).fillna("")
+
+        if isinstance(df_main[col].dtype, pd.PeriodDtype):
+            # Convert the period column to string
+            df_main[col] = df_main[col].astype(str)
+
+    df_main.to_csv(os.path.join(data_folder, "clean", "experiments.csv"))
+
 
 # %%
