@@ -31,6 +31,7 @@ from dateutil.parser import parse
 from spellchecker import SpellChecker
 from collections import defaultdict
 from itertools import combinations
+from datetime import datetime
 
 import pickle
 
@@ -279,6 +280,14 @@ def residualize(df_full, dependent_var, indep_vars, absorb_vars, residual_name):
         df_full[residual_name] = res.resid + y.mean()
 
     return df_full
+
+
+def load_residuals(data_folder):
+    dfs = []
+    for file in os.listdir(f"{data_folder}/working/residuals"):
+        df = pd.read_pickle(os.path.join(data_folder, "working", "residuals", file))
+        dfs.append(df)
+    return pd.concat(dfs)
 
 
 # %%

@@ -57,6 +57,9 @@ def restrict_data(
 
     text += f"Full controls:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
 
+    if row.property_id == "1 12 BN11 4BH":
+        text += f"XXXXXX {controls[controls.property_id=='14A BN11 3HP'][['property_id','duration2023','date','L_date','distance']]}"
+
     # Choose smallest distance such that the dates are connected
     dates = None
     for radius in radii:
@@ -96,15 +99,15 @@ def restrict_data(
             text += f">>We matched all controls. No need to keep searching.\n\n"
             break
 
-        # text += f"\nRADIUS TOO SMALL: {radius}\n"
-        # text += f"\n{sub[['property_id','date','L_date','duration2023','distance']].head(50)}\n\n\n"
-        # connected_dates = uf.build_groups()
-        # for key in connected_dates:
-        #     text += f"{key}: {sorted(connected_dates[key])}\n"
+        text += f"\nRADIUS TOO SMALL: {radius}\n"
+        text += f"\n{sub[['property_id','date','L_date','duration2023','distance']].head(50)}\n\n\n"
+        connected_dates = uf.build_groups()
+        for key in connected_dates:
+            text += f"{key}: {sorted(connected_dates[key])}\n"
 
-    # text += f"Restricted controls for radius {radius}:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
-    # text += f"Dates for which we are building RSI: {dates}"
-    # print(text)
+    text += f"Restricted controls for radius {radius}:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
+    text += f"Dates for which we are building RSI: {dates}"
+    print(text)
 
     # end = time.time()
     # print('-->Restrict data time:', end-start)
@@ -469,35 +472,37 @@ def add_weights(df, residuals):
     return df
 
 
-def restrict_columns(df):
-    df = df[
-        [
-            "property_id",
-            "date_trans",
-            "L_date_trans",
-            "year",
-            "L_year",
-            "quarter",
-            "L_quarter",
-            "years_held",
-            "d_log_price",
-            "area",
-            "postcode",
-            "extension",
-            "latitude",
-            "longitude",
-            "duration2023",
-            "whb_duration",
-            "date_extended",
-            "extension_amount",
-            "duration",
-            "L_duration",
-        ]
-    ]
+def restrict_columns(df, extra_cols=[]):
+    cols = [
+        "property_id",
+        "date_trans",
+        "L_date_trans",
+        "year",
+        "L_year",
+        "quarter",
+        "L_quarter",
+        "years_held",
+        "d_log_price",
+        "d_pres_main",
+        "area",
+        "postcode",
+        "extension",
+        "latitude",
+        "longitude",
+        "duration2023",
+        "whb_duration",
+        "date_extended",
+        "extension_amount",
+        "duration",
+        "L_duration",
+    ] + extra_cols
+    df = df[[col for col in cols if col in df.columns]]
     return df
 
 
-def load_data(folder, restrict_cols=True, filepath="clean/leasehold_flats_lw.p"):
+def load_data(
+    folder, restrict_cols=True, filepath="clean/leasehold_flats_lw.p", extra_cols=[]
+):
     df = pd.read_pickle(os.path.join(folder, filepath))
 
     # Drop impossible controls
@@ -522,7 +527,7 @@ def load_data(folder, restrict_cols=True, filepath="clean/leasehold_flats_lw.p")
 
     # Keep only relevant columns
     if restrict_cols:
-        df = restrict_columns(df)
+        df = restrict_columns(df, extra_cols=extra_cols)
 
     # Create a date variable
     df["date"] = df["year"] * 4 + df["quarter"]
@@ -639,6 +644,48 @@ def get_residuals(
     #     combined_residuals.to_pickle(file)
 
 
+def load_residuals(data_folder):
+    dfs = []
+    for file in os.listdir(f"{data_folder}/working/residuals"):
+        print(file)
+        df = pd.read_pickle(os.path.join(data_folder, "working", "residuals", file))
+        dfs.append(df)
+    return pd.concat(dfs)
+
+
+def construct_rsi_no_parallel(
+    data_folder,
+    start_year=1995,
+    start_quarter=1,
+    end_year=2024,
+    end_quarter=1,
+    n_jobs=16,
+):
+
+    start_date = start_year * 4 + start_quarter
+    end_date = end_year * 4 + end_quarter
+
+    df = load_data(data_folder)
+    df = df[df.area == "BN"]
+
+    # Get weights
+    print("Getting residuals")
+    residuals = load_residuals(data_folder)
+    df = add_weights(df, residuals)
+
+    df.drop(df[df.years_held < 2].index, inplace=True)
+    extensions, controls = get_extensions_controls(df)
+
+    rsi = get_rsi(
+        extensions,
+        controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=True,
+        n_jobs=1,
+    )
+
+
 def construct_rsi(
     data_folder,
     start_year=1995,
@@ -656,11 +703,11 @@ def construct_rsi(
     end_date = end_year * 4 + end_quarter
 
     df = load_data(data_folder)
-    df = df[df.area.str.startswith("B")]
+    # df = df[df.area.str.startswith('B')]
 
     # Get weights
     print("Getting residuals")
-    residuals = pd.read_pickle(os.path.join(data_folder, "working", "residuals.p"))
+    residuals = load_residuals(data_folder)
     df = add_weights(df, residuals)
 
     local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
@@ -714,7 +761,7 @@ def construct_rsi(
     )
     rsi_hedonics_gather = comm.gather(rsi_hedonics, root=0)
 
-    # # No weights
+    # No weights
     print("Getting BMN RSI")
     print(f"Num cores: {os.cpu_count()}")
     rsi_bmn = get_rsi(
@@ -726,33 +773,33 @@ def construct_rsi(
     )
     rsi_bmn_gather = comm.gather(rsi_bmn, root=0)
 
-    # # # Yearly
-    # print("Getting annual RSI")
-    # df["date"] = df["year"]
-    # df["L_date"] = df["L_year"]
-    # df.drop(df[df.date == df.L_date].index, inplace=True)
-    # local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
-    # rsi_yearly = get_rsi(
-    #     local_extensions,
-    #     local_controls,
-    #     start_date=start_year,
-    #     end_date=end_year,
-    #     case_shiller=True,
-    # )
-    # rsi_yearly_gather = comm.gather(rsi_yearly, root=0)
+    # Yearly
+    print("Getting annual RSI")
+    df["date"] = df["year"]
+    df["L_date"] = df["L_year"]
+    df.drop(df[df.date == df.L_date].index, inplace=True)
+    local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
+    rsi_yearly = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_year,
+        end_date=end_year,
+        case_shiller=True,
+    )
+    rsi_yearly_gather = comm.gather(rsi_yearly, root=0)
 
-    # # Postcode RSI
-    # print("Postcode RSI:")
+    # Postcode RSI
+    print("Postcode RSI:")
 
-    # rsi_postcode = get_rsi(
-    #     local_extensions,
-    #     local_controls,
-    #     start_date=start_year,
-    #     end_date=end_year,
-    #     case_shiller=True,
-    #     groupby="postcode",
-    # )
-    # rsi_postcode_gather = comm.gather(rsi_postcode, root=0)
+    rsi_postcode = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_year,
+        end_date=end_year,
+        case_shiller=True,
+        groupby="postcode",
+    )
+    rsi_postcode_gather = comm.gather(rsi_postcode, root=0)
 
     if rank == 0:
 
@@ -776,13 +823,13 @@ def construct_rsi(
         combined_rsi = pd.concat(rsi_bmn_gather)
         combined_rsi.to_pickle(file)
 
-        # file = os.path.join(data_folder, "working", "rsi_yearly.p")
-        # combined_rsi = pd.concat(rsi_yearly_gather)
-        # combined_rsi.to_pickle(file)
+        file = os.path.join(data_folder, "working", "rsi_yearly.p")
+        combined_rsi = pd.concat(rsi_yearly_gather)
+        combined_rsi.to_pickle(file)
 
-        # file = os.path.join(data_folder, "working", "rsi_postcode.p")
-        # combined_rsi = pd.concat(rsi_postcode_gather)
-        # combined_rsi.to_pickle(file)
+        file = os.path.join(data_folder, "working", "rsi_postcode.p")
+        combined_rsi = pd.concat(rsi_postcode_gather)
+        combined_rsi.to_pickle(file)
 
 
 def update_rsi(

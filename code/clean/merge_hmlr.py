@@ -835,8 +835,8 @@ def finalize_data(df, original_data_folder):
         df[f"{var}20yr"] = df[var].round(20)
         df[f"{var}p1000"] = df[var] / 1000
 
-    df["duration2023"] = df["number_years"] - years_between_dates(
-        pd.Period("2023-01-01", freq="D") - df.date_from
+    df["duration2023"] = df["number_years"] - np.floor(
+        years_between_dates(pd.Period("2023-01-01", freq="D") - df.date_from)
     )
     df.loc[df.extension, "duration2023"] = df.duration2023 - df.extension_amount
     df["duration2023"] = df["duration2023"].round()
@@ -855,74 +855,78 @@ def convert_hedonics_data(data_folder):
 
 
 def merge_hmlr(data_folder):
-    print("Merging HMLR data.")
+    # print("Merging HMLR data.")
 
-    # Merge open leases
-    price_data = pd.read_pickle(
-        os.path.join(data_folder, "working", "price_data_leaseholds.p")
+    # # Merge open leases
+    # price_data = pd.read_pickle(
+    #     os.path.join(data_folder, "working", "price_data_leaseholds.p")
+    # )
+    # lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
+    # purchased_leases = pd.read_pickle(
+    #     os.path.join(data_folder, "working", "purchased_lease_data.p")
+    # )
+    # merge_keys = merge_wrapper(
+    #     get_price_for_merge(price_data.copy()), get_lease_for_merge(lease_data.copy())
+    # )
+
+    # # Merge closed leases
+    # merged = merge_purchased_leases(price_data, purchased_leases)
+
+    # # Merge with open leases
+    # merged = merge_open_leases(merged, merge_keys, lease_data)
+
+    # # Identify extended leases
+    # merged["has_been_extended"] = (
+    #     (merged.closed_lease)
+    #     & (
+    #         (merged.date_from.dt.year + merged.number_years)
+    #         - (merged.date_from_purch.dt.year + merged.number_years_purch)
+    #         > 30
+    #     )
+    #     & (~merged.date_from.isna())
+    # )
+    # merged.loc[merged.has_been_extended, "extension_amount"] = (
+    #     merged.date_from.dt.year + merged.number_years
+    # ) - (merged.date_from_purch.dt.year + merged.number_years_purch)
+
+    # # Use purchased leases when available
+    # for var in ["date_from", "number_years", "date_registered"]:
+    #     merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
+    # merged.loc[merged.closed_lease, "date_registered"] = np.nan
+
+    # # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
+    # for var in ["date_from", "number_years"]:
+    #     merged["temp"] = np.where(
+    #         (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
+    #     )
+    #     merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
+    #         "temp"
+    #     ].transform("first")
+    #     merged.drop(columns="temp", inplace=True)
+
+    # merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
+    # merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
+
+    # # Append freeholds
+    # freeholds = pd.read_pickle(
+    #     os.path.join(data_folder, "working", "price_data_freeholds.p")
+    # )
+    # merged = pd.concat([merged, freeholds])
+
+    # merged = additional_cleaning(merged, data_folder)
+    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_all.p"))
+
+    # # Keep only flats for main data
+    # merged.drop(merged[~merged.flat].index, inplace=True)
+    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
+
+    # # Merge in hedonics data
+    # merged = merge_with_hedonics(merged, data_folder)
+    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_hedonics.p"))
+
+    merged = pd.read_pickle(
+        os.path.join(data_folder, "working", "merged_hmlr_hedonics.p")
     )
-    lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
-    purchased_leases = pd.read_pickle(
-        os.path.join(data_folder, "working", "purchased_lease_data.p")
-    )
-    merge_keys = merge_wrapper(
-        get_price_for_merge(price_data.copy()), get_lease_for_merge(lease_data.copy())
-    )
-
-    # Merge closed leases
-    merged = merge_purchased_leases(price_data, purchased_leases)
-
-    # Merge with open leases
-    merged = merge_open_leases(merged, merge_keys, lease_data)
-
-    # Identify extended leases
-    merged["has_been_extended"] = (
-        (merged.closed_lease)
-        & (
-            (merged.date_from.dt.year + merged.number_years)
-            - (merged.date_from_purch.dt.year + merged.number_years_purch)
-            > 30
-        )
-        & (~merged.date_from.isna())
-    )
-    merged.loc[merged.has_been_extended, "extension_amount"] = (
-        merged.date_from.dt.year + merged.number_years
-    ) - (merged.date_from_purch.dt.year + merged.number_years_purch)
-
-    # Use purchased leases when available
-    for var in ["date_from", "number_years", "date_registered"]:
-        merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
-    merged.loc[merged.closed_lease, "date_registered"] = np.nan
-
-    # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
-    for var in ["date_from", "number_years"]:
-        merged["temp"] = np.where(
-            (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
-        )
-        merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
-            "temp"
-        ].transform("first")
-        merged.drop(columns="temp", inplace=True)
-
-    merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
-    merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
-
-    # Append freeholds
-    freeholds = pd.read_pickle(
-        os.path.join(data_folder, "working", "price_data_freeholds.p")
-    )
-    merged = pd.concat([merged, freeholds])
-
-    merged = additional_cleaning(merged, data_folder)
-    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_all.p"))
-
-    # Keep only flats for main data
-    merged.drop(merged[~merged.flat].index, inplace=True)
-    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
-
-    # Merge in hedonics data
-    merged = merge_with_hedonics(merged, data_folder)
-    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_hedonics.p"))
 
     # Finalize
     merged.drop(merged[~merged.leasehold].index, inplace=True)

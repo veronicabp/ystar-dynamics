@@ -106,7 +106,8 @@ def create_experiments(df_main, rsi_dfs, data_folder):
         if col.startswith("did_rsi"):
             lower = df_main[col].quantile(0.005)
             upper = df_main[col].quantile(0.995)
-            df_main[col] = df_main[col].clip(lower, upper)
+            df_main[f"{col}_win"] = df_main[col].clip(lower, upper)
+            df_main.loc[df_main[col] != df_main[f"{col}_win"], col] = np.nan
 
     # Create version without flippers
     df_flip = df_main.copy()
@@ -170,7 +171,7 @@ def run_create_experiments(data_folder):
     extensions = df.drop(df[~df.extension].index)
 
     rsi_dfs = []
-    for tag in ["", "_bmn", "_yearly", "_postcode"]:
+    for tag in ["", "_bmn", "_yearly", "_postcode", "_hedonics"]:
         print(f">Loading rsi{tag}")
         rsi = pd.read_pickle(os.path.join(data_folder, "working", f"rsi{tag}.p"))
         rsi_clean = clean_rsi(rsi, tag)
@@ -178,18 +179,5 @@ def run_create_experiments(data_folder):
 
     df_main, df_flip, df_public = create_experiments(extensions, rsi_dfs, data_folder)
     df_main.to_pickle(os.path.join(data_folder, "clean", "experiments.p"))
-
-    for col in df_main.columns:
-        # Check if the column has an object dtype, which can cause issues with `to_stata`
-        if df_main[col].dtype == "object":
-            # Convert to string and handle NaN values
-            df_main[col] = df_main[col].astype(str).fillna("")
-
-        if isinstance(df_main[col].dtype, pd.PeriodDtype):
-            # Convert the period column to string
-            df_main[col] = df_main[col].astype(str)
-
-    df_main.to_csv(os.path.join(data_folder, "clean", "experiments.csv"))
-
-
-# %%
+    df_flip.to_pickle(os.path.join(data_folder, "clean", "experiments_flip.p"))
+    df_public.to_pickle(os.path.join(data_folder, "clean", "experiments_public.p"))

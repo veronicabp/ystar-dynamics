@@ -172,7 +172,7 @@ def get_experiment_ids(data_folder):
     experiments["type"] = "extension"
     experiments.to_pickle(os.path.join(data_folder, "working", "extension_pids.p"))
 
-    controls = pd.read_pickle(os.path.join(data_folder, "working", "residuals.p"))
+    controls = load_residuals(data_folder)
     controls["experiment_pid"] = controls["pid_treated"]
     controls["experiment_date"] = controls["date_trans_treated"]
     controls["property_id"] = controls["pid_control"]
@@ -640,14 +640,8 @@ def global_rtp(data_folder):
 
 
 def rightmove_desriptions(data_folder):
-    descriptions_path = os.path.join(
-        data_folder, "working", "rightmove_descriptions.dta"
-    )
-    descriptions_df = pd.read_stata(descriptions_path)
-    for col in descriptions_df.select_dtypes(include=["object"]):
-        descriptions_df[col] = (
-            descriptions_df[col].str.replace(r"\\t", "", regex=True).str.strip()
-        )
+    descriptions_path = os.path.join(data_folder, "working", "rightmove_descriptions.p")
+    descriptions_df = pd.read_pickle(descriptions_path)
 
     # Merge with rightmove_merge_keys
     merge_keys_path = os.path.join(data_folder, "working", "rightmove_merge_keys.p")
@@ -709,3 +703,29 @@ def rightmove_desriptions(data_folder):
     # Save renovations data
     renovations_path = os.path.join(data_folder, "working", "renovations.p")
     merged_df.to_pickle(renovations_path)
+
+
+def make_additional_datasets(data_folder):
+
+    # print("Building rent panel")
+    # build_rent_panel(data_folder)
+
+    # print("Getting experiment IDs")
+    # get_experiment_ids(data_folder)
+
+    # print("Building experiment rent panel")
+    # get_experiment_rent_panel(data_folder)
+
+    print("Making ystar timeseries")
+    make_timeseries(data_folder)
+
+    # print("Building event study")
+    # build_event_study(data_folder)
+    # # calculate_housing_risk_premium(data_folder)
+
+    # print("Getting global valuation data")
+    # global_forward_rates(data_folder)
+    # global_rtp(data_folder)
+
+    # print("Compiling rightmove descriptions")
+    # rightmove_desriptions(data_folder)
