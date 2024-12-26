@@ -8,40 +8,19 @@
 *****************************************
 
 ****** Yearly regressions ******
-// For pre-2003, get mean y* for all years
-use "$clean/experiments.dta", clear
-gen xaxis = _n+1999 if _n<=4
-nl $nlfunc if year<=2003, initial(ystar 3) variables(did_rsi T k) vce(robust)
-gen ystar_pre=_b[/ystar]
-gen ub_pre= _b[/ystar] + 1.96*_se[/ystar]
-gen lb_pre= _b[/ystar] - 1.96*_se[/ystar]
-
-gen xaxis12 = xaxis*12
-replace year = xaxis
-
-keep xaxis12 year ystar ub lb 
-drop if missing(xaxis)
-tempfile pre2003
-save `pre2003'
-
 use "$clean/uk_interest_rates.dta", clear
 collapse uk*, by(year)
 
-merge 1:1 year using "$clean/ystar_yearly.dta", nogen
-merge 1:1 year using `pre2003', nogen
-replace ystar = ystar_pre if year<=2003
-replace ub = ub_pre if year<=2003
-replace lb = lb_pre if year<=2003
+gen date = year
+merge 1:1 date using "$clean/ystar_estimates.dta", nogen keep(master match)
+drop date
 
-merge 1:1 year using "$working/global_forward.dta", nogen
-replace rate10y20 = rate10y20*100
-
-merge 1:1 year using "$working/global_rtp.dta", nogen
-merge 1:1 year using "$working/uk_rtp.dta", nogen
+merge 1:1 year using "$clean/global_forward.dta", nogen
+merge 1:1 year using "$clean/global_rtp.dta", nogen
+merge 1:1 year using "$clean/uk_rtp.dta", nogen
 
 tset year
-gen w=1/var
-gen xaxis = xaxis12/12
+gen w=1/(se^2)
 
 * Adjust interest rates assuming 3% inflation
 gen rate10y20_real = rate10y20-3
@@ -55,7 +34,7 @@ replace rtp_uk = rtp_uk[_n-1] * rent_price_uk/rent_price_uk[_n-1] if _n>1
 gen rtp_global = ystar if year==2023
 replace rtp_global = rtp_uk[_n-1] * rent_price_global/rent_price_global[_n-1] if _n>1
 
-replace xaxis = year
+gen xaxis = year
 
 ***** Plots
 twoway 	(line ystar xaxis if xaxis>=2003, lcolor(black) lpattern(solid)) ///
@@ -164,7 +143,7 @@ esttab using "$tab/cross_sectional_risk.tex", ///
 	b(2) se(2) keep(beta refusal_predicted) ///
 	order(beta refusal_predicted) ///
 	varlabels(beta "Housing $\beta$" refusal_predicted "Predicted Refusal Rate") ///
-	mgroups("Housing $\beta$" "$ y^*" "$\Delta y^*$", pattern(1 1 0 1) ///
+	mgroups("Housing $\beta$" "$ y^*$" "$\Delta y^*$", pattern(1 1 0 1) ///
 				prefix(\multicolumn{@span}{c}{) suffix(}) ///
 				span erepeat(\cmidrule(lr){@span})) ///
 	nomtitle ///
@@ -177,3 +156,42 @@ esttab using "$tab/cross_sectional_risk.tex", ///
 
 binscatter2 ystar_all beta [aw=w], xtitle("Local Housing Beta") ytitle("y*")
 graph export "$fig/cross_sectional_risk_binscatter.png", replace
+
+
+*****************************************
+* Table: Climate Risk
+*****************************************
+use "$clean/ystar_by_lpas_2009-2022.dta", clear
+drop if missing(d_ystar)
+
+eststo clear
+eststo: reg ystar_all flood_risk_share  [aw=w_all], vce(robust)
+eststo: reg ystar_all probable_risk_2030_share  [aw=w_all], vce(robust)
+
+esttab using "$tab/climate_risk.tex", ///
+	mgroups("$ y^*$", pattern(1 0) ///
+				prefix(\multicolumn{@span}{c}{) suffix(}) ///
+				span erepeat(\cmidrule(lr){@span})) ///
+	nomtitle ///
+	keep(flood_risk_share probable_risk_2030_share) ///
+	varlabel(	flood_risk_share "Flood Risk" ///
+				probable_risk_2030_share "Subsidence Risk") ///
+	stats(N r2, label("N" "R2") fmt(0 2)) ///
+	se(2) b(2) replace
+
+// eststo clear
+// eststo: reg ystar_all flood_risk_share  [aw=w_all], vce(robust)
+// eststo: reg ystar_all probable_risk_2030_share  [aw=w_all], vce(robust)
+// eststo: reg d_ystar flood_risk_share  [aw=w], vce(robust)
+// eststo: reg d_ystar probable_risk_2030_share  [aw=w], vce(robust)
+//
+// esttab using "$tab/climate_risk.tex", ///
+// 	mgroups("$ y^*$" "$\Delta y^*$", pattern(1 0 1) ///
+// 				prefix(\multicolumn{@span}{c}{) suffix(}) ///
+// 				span erepeat(\cmidrule(lr){@span})) ///
+// 	nomtitle ///
+// 	keep(flood_risk_share probable_risk_2030_share) ///
+// 	varlabel(	flood_risk_share "Flood Risk" ///
+// 				probable_risk_2030_share "Subsidence Risk") ///
+// 	stats(N r2, label("N" "R2") fmt(0 2)) ///
+// 	se(2) b(2) replace

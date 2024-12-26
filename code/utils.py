@@ -3,27 +3,25 @@
 import pandas as pd
 import numpy as np
 
-import dask.dataframe as dd
+import geopandas as gpd
+from shapely.ops import unary_union
 
-# from dask_jobqueue import SLURMCluster
-from dask.distributed import Client, LocalCluster, progress
-from dask.diagnostics import ProgressBar
-import dask.dataframe as dd
-from dask import delayed, compute
 from pqdm.processes import pqdm
 from multiprocessing import Pool, cpu_count
 from mpi4py import MPI
 import swifter
+import dask.dataframe as dd
 
 from tqdm import tqdm
 
 import os
 import re
+import pickle
 import sys
 import time
 import csv
 import json
-from math import ceil
+from math import e, sin, pi, ceil, log
 
 from word2number import w2n
 from textblob import TextBlob
@@ -33,8 +31,6 @@ from collections import defaultdict
 from itertools import combinations
 from datetime import datetime
 
-import pickle
-
 import statsmodels.api as sm
 from sklearn.utils import resample
 from scipy.optimize import curve_fit
@@ -42,21 +38,58 @@ from scipy.optimize import least_squares
 from linearmodels.iv.absorbing import AbsorbingLS
 from statsmodels.tsa.api import VAR
 
-# from memory_profiler import profile
+from scipy.optimize import least_squares
+import scipy.stats as stats
+
+import seaborn as sns
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, Normalize, ListedColormap
+from matplotlib.cm import ScalarMappable
+from matplotlib.ticker import FuncFormatter
+from matplotlib.collections import LineCollection
+from matplotlib.lines import Line2D
+from stargazer.stargazer import Stargazer
 
 import warnings
 
+from pandas.errors import PerformanceWarning
+
+#### Silence irrelevant warnings
+warnings.filterwarnings("ignore", category=PerformanceWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", message="kurtosistest only valid for n>=20")
 warnings.filterwarnings(
     "ignore", message="omni_normtest is not valid with less than 8 observations"
 )
 warnings.filterwarnings("ignore", message=".*kurtosistest.*")
+warnings.filterwarnings(
+    "ignore",
+    message="DataFrame is highly fragmented. This is usually the result of calling `frame.insert` many times",
+)
 
+#### Set pandas settings
 tqdm.pandas()
 pd.set_option("future.no_silent_downcasting", True)
 
+#### Set matplotlib settings
+mpl.rc("font", family="Times New Roman", size=30)
+mpl.rcParams["mathtext.fontset"] = "custom"
+mpl.rcParams["mathtext.rm"] = "Times New Roman"
+mpl.rcParams["mathtext.it"] = "Times New Roman:italic"
+mpl.rcParams["mathtext.bf"] = "Times New Roman:bold"
+
+# Make color map
+viridis = mpl.colormaps["viridis"]
+newcolors = viridis(np.linspace(0, 1, 100))[0:80]
+cmap = ListedColormap(newcolors)
+
+#### Set recursion limit
+sys.setrecursionlimit(5000)
+
+#### Define parameters
 n_jobs = int(os.cpu_count()) - 2
+
 hedonics_rm_full = [
     "bedrooms",
     "bathrooms",
@@ -67,12 +100,7 @@ hedonics_rm_full = [
     "heatingtype",
     "condition",
 ]
-hedonics_rm = [
-    "bedrooms",
-    "bathrooms",
-    "floorarea",
-    "yearbuilt",
-]
+hedonics_rm = ["bedrooms", "bathrooms", "floorarea", "yearbuilt", "livingrooms"]
 hedonics_zoop = [
     "bedrooms_zoop",
     "bathrooms_zoop",
@@ -157,6 +185,17 @@ def create_string_id(
     return df
 
 
+def load_residuals(data_folder):
+    dfs = []
+    for file in os.listdir(f"{data_folder}/working/residuals"):
+        # print(file)
+        if not file.startswith("residual"):
+            continue
+        df = pd.read_pickle(os.path.join(data_folder, "working", "residuals", file))
+        dfs.append(df)
+    return pd.concat(dfs)
+
+
 def years_between_dates(s):
     return s.apply(lambda x: x.n / 365 if pd.notna(x) else np.nan)
 
@@ -179,17 +218,21 @@ def get_union(df):
     return uf
 
 
-def estimate_ystar(df, lhs_var="did_rsi"):
-    def model_function(ystar, T, k):
-        # Compute the exponents
-        exponent_A = (ystar / 100) * (T + k)
-        exponent_B = (ystar / 100) * T
+def baseline_ystar_function(ystar, T, k):
+    # Compute the exponents
+    exponent_A = (ystar / 100) * (T + k)
+    exponent_B = (ystar / 100) * T
 
-        # Calculate the expressions, ensuring numerical stability
-        expr1 = np.log(np.clip(1 - np.exp(-exponent_A), 1e-15, None))
-        expr2 = np.log(np.clip(1 - np.exp(-exponent_B), 1e-15, None))
+    # Calculate the expressions, ensuring numerical stability
+    expr1 = np.log(np.clip(1 - np.exp(-exponent_A), 1e-15, None))
+    expr2 = np.log(np.clip(1 - np.exp(-exponent_B), 1e-15, None))
 
-        return expr1 - expr2
+    return expr1 - expr2
+
+
+def estimate_ystar(
+    df, lhs_var="did_rsi", model_function=baseline_ystar_function, get_se=True
+):
 
     def residuals(params, T, k, lhs_var):
         # Calculate residuals
@@ -210,42 +253,51 @@ def estimate_ystar(df, lhs_var="did_rsi"):
     initial_guess = [3]
 
     # Perform the least squares optimization
-    result = least_squares(
-        residuals,
-        initial_guess,
-        args=(T, k, did),
-        bounds=([0], [np.inf]),  # Ensure ystar stays positive
-        method="trf",  # Trust Region Reflective algorithm
-        jac="2-point",  # Numerical estimation of the Jacobian
-    )
+    try:
+        result = least_squares(
+            residuals,
+            initial_guess,
+            args=(T, k, did),
+            bounds=([0], [np.inf]),  # Ensure ystar stays positive
+            method="trf",  # Trust Region Reflective algorithm
+            jac="2-point",  # Numerical estimation of the Jacobian
+        )
 
-    # Extract the estimated parameter
-    ystar_estimate = result.x[0]
+        # Extract the estimated parameter
+        ystar_estimate = result.x[0]
 
-    # Calculate residuals at the solution
-    resid = result.fun  # This is lhs_var - model_function(params, T, k)
+        if get_se:
+            # Calculate residuals at the solution
+            resid = result.fun  # This is lhs_var - model_function(params, T, k)
 
-    # Obtain the Jacobian matrix at the solution
-    J = result.jac  # Shape: (number of observations, number of parameters)
+            # Obtain the Jacobian matrix at the solution
+            J = result.jac  # Shape: (number of observations, number of parameters)
 
-    # Number of observations and parameters
-    n_obs = len(did)
-    n_params = len(result.x)
+            # Number of observations and parameters
+            n_obs = len(did)
+            n_params = len(result.x)
 
-    # Compute the robust covariance matrix using the sandwich estimator
-    # Inverse of (J^T J)
-    JTJ_inv = np.linalg.inv(J.T @ J)
+            # Compute the robust covariance matrix using the sandwich estimator
+            # Inverse of (J^T J)
+            JTJ_inv = np.linalg.inv(J.T @ J)
 
-    # Middle matrix: J^T * diag(residuals^2) * J
-    middle_matrix = J.T @ np.diag(resid**2) @ J
+            # Middle matrix: J^T * diag(residuals^2) * J
+            middle_matrix = J.T @ np.diag(resid**2) @ J
 
-    # Robust covariance matrix
-    robust_cov = JTJ_inv @ middle_matrix @ JTJ_inv
+            # Robust covariance matrix
+            robust_cov = JTJ_inv @ middle_matrix @ JTJ_inv
 
-    # Extract the robust standard error for ystar
-    ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
+            # Extract the robust standard error for ystar
+            ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
 
-    return ystar_estimate, ystar_std_error
+        else:
+            ystar_std_error = np.nan
+
+        return ystar_estimate, ystar_std_error
+
+    except:
+        print("XXX NLLS estimation failed.")
+        return np.nan, np.nan
 
 
 def residualize(df_full, dependent_var, indep_vars, absorb_vars, residual_name):
@@ -280,14 +332,6 @@ def residualize(df_full, dependent_var, indep_vars, absorb_vars, residual_name):
         df_full[residual_name] = res.resid + y.mean()
 
     return df_full
-
-
-def load_residuals(data_folder):
-    dfs = []
-    for file in os.listdir(f"{data_folder}/working/residuals"):
-        df = pd.read_pickle(os.path.join(data_folder, "working", "residuals", file))
-        dfs.append(df)
-    return pd.concat(dfs)
 
 
 # %%

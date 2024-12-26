@@ -1,7 +1,7 @@
 from utils import *
 
 
-def hazard_rate(data_folder):
+def calculate_hazard_rate(data_folder, start_year=2003):
 
     # Load the leasehold flats data
     leasehold_path = os.path.join(data_folder, "clean", "leasehold_flats.p")
@@ -19,9 +19,7 @@ def hazard_rate(data_folder):
     ]["property_id"].nunique()
 
     hazard_correction = 1 + (missing_pre / total_extensions)
-
-    # Define the start year
-    start_year = 2003
+    print("Hazard correction:", hazard_correction)
 
     # Round and modify values
     leasehold_df["extension_year"] = np.where(
@@ -30,24 +28,19 @@ def hazard_rate(data_folder):
         np.nan,
     )
 
-    leasehold_df["extension_amount"] = (
-        leasehold_df["extension_amount"].fillna(0).astype(int)
-    )
+    leasehold_df["extension_amount"] = np.floor(leasehold_df["extension_amount"])
     leasehold_df["extension_amount"] = np.where(
         leasehold_df["has_been_extended"] & ~leasehold_df["extension"],
         90,
         leasehold_df["extension_amount"],
     )
-    leasehold_df["duration"] = leasehold_df["duration"].fillna(0).astype(int)
+    leasehold_df["duration"] = np.floor(leasehold_df["duration"])
 
     # Drop duplicate property entries
     leasehold_df = leasehold_df[
         ~(leasehold_df["has_extension"] & ~leasehold_df["extension"])
-    ]
-    leasehold_df["tag"] = (
-        leasehold_df.groupby("property_id")["property_id"].transform("count") == 1
-    )
-    leasehold_df = leasehold_df[leasehold_df["tag"]]
+    ].copy()
+    leasehold_df.drop_duplicates(subset="property_id", inplace=True)
 
     # Generate starting duration
     leasehold_df[f"duration{start_year}"] = leasehold_df["duration"] + (
@@ -61,7 +54,7 @@ def hazard_rate(data_folder):
     ] -= leasehold_df["extension_amount"]
 
     leasehold_df[f"extended{start_year}"] = leasehold_df["extension_year"] == start_year
-    leasehold_df = leasehold_df[leasehold_df[f"duration{start_year}"] >= 0]
+    leasehold_df = leasehold_df[leasehold_df[f"duration{start_year}"] >= 0].copy()
 
     # Generate yearly updates for durations and extensions
     for year in range(start_year, 2024):
@@ -83,29 +76,77 @@ def hazard_rate(data_folder):
             (leasehold_df["mindur"] < 0)
             & (leasehold_df["has_been_extended"] | leasehold_df["extension"])
         )
+    ].copy()
+
+    id_vars = [
+        "property_id",
+        "number_years",
+        "date_from",
+        "date_extended",
+        "extension_amount",
+        "extension",
+        "has_been_extended",
     ]
+    cols = id_vars + [
+        col
+        for col in leasehold_df.columns
+        if re.search(r"(duration|extended)\d{4}", col)
+    ]
+    leasehold_df = leasehold_df[cols].copy()
 
-    # Reshape to long format
-    leasehold_long = pd.wide_to_long(
-        leasehold_df,
-        stubnames=["duration", "extended"],
-        i=[
-            "property_id",
-            "number_years",
-            "date_from",
-            "date_extended",
-            "extension_amount",
+    leasehold_df["has_been_extended"] = leasehold_df["has_been_extended"].astype(int)
+    leasehold_df["extension"] = leasehold_df["extension"].astype(int)
+
+    # Reshape long using Dask to avoid memory issues
+    ddf = dd.from_pandas(leasehold_df, npartitions=20)
+    dur_df = ddf.melt(
+        id_vars=id_vars,
+        value_vars=[
+            col for col in leasehold_df.columns if re.search(r"duration\d{4}", col)
         ],
-        j="year",
-    ).reset_index()
+        var_name="variable",
+        value_name="duration",
+    )
+    dur_df["year"] = dur_df["variable"].str.extract(r"(\d{4})")[0].astype(int)
+    dur_df = dur_df.drop("variable", axis=1)
 
+    ext_df = ddf.melt(
+        id_vars=id_vars,
+        value_vars=[
+            col for col in leasehold_df.columns if re.search(r"extended\d{4}", col)
+        ],
+        var_name="variable",
+        value_name="extended",
+    )
+    ext_df["year"] = ext_df["variable"].str.extract(r"(\d{4})")[0].astype(int)
+    ext_df = ext_df.drop("variable", axis=1)
+
+    leasehold_long = dur_df.merge(ext_df, on=id_vars + ["year"])
+    leasehold_long = leasehold_long.compute()
+
+    # Remove dates before the lease was initiated
+    leasehold_long = leasehold_long[
+        ~(
+            (leasehold_long.year < leasehold_long.date_from.dt.year)
+            & (
+                ~(
+                    (leasehold_long.extension == 1)
+                    | (leasehold_long.has_been_extended == 1)
+                )
+            )
+        )
+    ].copy()
+    leasehold_long.dropna(subset="duration", inplace=True)
+
+    leasehold_long.sort_values(by=["property_id", "year"], inplace=True)
     leasehold_long["L_duration"] = leasehold_long.groupby("property_id")[
         "duration"
     ].shift(1)
     leasehold_long["L_duration_bin"] = leasehold_long["L_duration"].apply(
-        lambda x: round(x, 5) if x >= 70 else int(x)
+        lambda x: np.round(x / 5) * 5 if x < 70 else x
     )
     leasehold_long = leasehold_long[leasehold_long["L_duration"] != 0]
+    leasehold_long.to_pickle(os.path.join(data_folder, "clean", "leasehold_panel.p"))
 
     # Hazard rate calculation
     hazard_df = leasehold_long[

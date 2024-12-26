@@ -2,7 +2,13 @@
 // Set paths
 global folder "/Users/vbp/Princeton Dropbox/Veronica Backer Peral/Research/natural-rate/ystar-dynamics"
 global dropbox "/Users/vbp/Princeton Dropbox/Veronica Backer Peral"
+
 global clean "$folder/data/original/clean"
+global working "$folder/data/original/working"
+global raw "$folder/data/original/raw"
+
+global update_folder "update_03_12_24"
+global clean_update "$folder/data/$update_folder/clean"
 
 
 global data "$folder/data/clean"
@@ -16,9 +22,13 @@ global hedonics_rm_full "$hedonics_rm parking currentenergyrating heatingtype co
 global hedonics_zoop "bathrooms_zoop bedrooms_zoop floors receptions"
 
 global year0 = 2003 
-global year1 = 2023
-global month1 = 12
-global month1_str = "December"
+// global year1 = 2023
+// global month1 = 12
+// global month1_str = "December"
+global year1 = 2024
+global month1 = 10
+global month1_str = "October"
+
 global ystar_func "({ystar}/100)"
 global nlfunc "(did_rsi = ln(1-exp(- $ystar_func * (T+k))) - ln(1-exp(-$ystar_func * T)))"
 

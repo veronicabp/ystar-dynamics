@@ -34,7 +34,7 @@ def restrict_data(
     radii=[0.1, 0.5] + [i for i in range(1, 21)],
 ):
     # start = time.time()
-    text += f"\n\n\n\n\nFinding controls for {row.property_id}, purchased in {row.L_date_trans} and sold in {row.date_trans} (dur2023={np.round(row.duration2023)})\n"
+    # text += f"\n\n\n\n\nFinding controls for {row.property_id}, purchased in {row.L_date_trans} and sold in {row.date_trans} (dur2023={np.round(row.duration2023)})\n"
 
     # Restrict duration
     controls = control_dict[row.duration2023]
@@ -54,12 +54,6 @@ def restrict_data(
         lambda x: haversine(row.lat_rad, row.lon_rad, x["lat_rad"], x["lon_rad"]),
         axis=1,
     )
-
-    text += f"Full controls:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
-
-    if row.property_id == "1 12 BN11 4BH":
-        text += f"XXXXXX {controls[controls.property_id=='14A BN11 3HP'][['property_id','duration2023','date','L_date','distance']]}"
-
     # Choose smallest distance such that the dates are connected
     dates = None
     for radius in radii:
@@ -107,7 +101,7 @@ def restrict_data(
 
     text += f"Restricted controls for radius {radius}:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
     text += f"Dates for which we are building RSI: {dates}"
-    print(text)
+    # print(text)
 
     # end = time.time()
     # print('-->Restrict data time:', end-start)
@@ -213,7 +207,7 @@ def rsi_wrapper(
     )
 
     text += f"{summary}\n\n"
-    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row['d_log_price']} for treated"
+    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row[price_var]} for treated"
     text += f"Radius = {radius}"
     # print(text)
 
@@ -415,6 +409,8 @@ def get_rsi(
     skipped = 0
     chunks = []
     for key, group in extensions_grouped:
+        print(f"{key}: {len(group)}")
+
         durations_list = group["duration2023"].unique()
         # print(key, durations_list)
 
@@ -442,10 +438,17 @@ def get_rsi(
                 func,
             )
         )
+    print(f"Num extensions: {len(extensions)}")
     print(f"Num chunks: {len(chunks)}")
     print(f"Skipped {skipped}.")
 
-    results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
+    # results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
+    results = []
+    for i, chunk in tqdm(enumerate(chunks)):
+        if len(chunk[0]) == 0:
+            continue
+        print(f"\n\nCHUNK{i}")
+        results.append(process_chunk(chunk))
 
     valid_results = [pd.DataFrame()] + [
         r for r in results if isinstance(r, (pd.DataFrame, pd.Series))
@@ -644,15 +647,6 @@ def get_residuals(
     #     combined_residuals.to_pickle(file)
 
 
-def load_residuals(data_folder):
-    dfs = []
-    for file in os.listdir(f"{data_folder}/working/residuals"):
-        print(file)
-        df = pd.read_pickle(os.path.join(data_folder, "working", "residuals", file))
-        dfs.append(df)
-    return pd.concat(dfs)
-
-
 def construct_rsi_no_parallel(
     data_folder,
     start_year=1995,
@@ -665,13 +659,13 @@ def construct_rsi_no_parallel(
     start_date = start_year * 4 + start_quarter
     end_date = end_year * 4 + end_quarter
 
-    df = load_data(data_folder)
-    df = df[df.area == "BN"]
+    df = load_data(data_folder, filepath="clean/lh_old_lw.p")
+    df = df[df.area == "B"]
 
-    # Get weights
-    print("Getting residuals")
-    residuals = load_residuals(data_folder)
-    df = add_weights(df, residuals)
+    # # Get weights
+    # print("Getting residuals")
+    # residuals = load_residuals(data_folder)
+    # df = add_weights(df, residuals)
 
     df.drop(df[df.years_held < 2].index, inplace=True)
     extensions, controls = get_extensions_controls(df)
@@ -681,9 +675,12 @@ def construct_rsi_no_parallel(
         controls,
         start_date=start_date,
         end_date=end_date,
-        case_shiller=True,
+        case_shiller=False,
         n_jobs=1,
     )
+
+    file = os.path.join(data_folder, "working", "rsi_old_data.p")
+    rsi.to_pickle(file)
 
 
 def construct_rsi(
@@ -832,25 +829,37 @@ def construct_rsi(
         combined_rsi.to_pickle(file)
 
 
+def get_start_end_date(df, freq="quarterly"):
+    start_year = df.L_year.min()
+    end_year = df.year.max()
+
+    start_quarter = df[df.L_year == start_year].L_quarter.min()
+    end_quarter = df[df.year == end_year].quarter.max()
+
+    start_date = int(start_year * 4 + start_quarter)
+    end_date = int(end_year * 4 + end_quarter)
+    return start_date, end_date
+
+
 def update_rsi(
     data_folder,
     prev_data_folder,
-    original_data_folder,
-    start_date=1995 * 4 + 1,
-    end_date=2024 * 4 + 6,
+    n_jobs=1,
 ):
     df = load_data(data_folder)
+    old_df = load_data(prev_data_folder)
 
-    # Load weights from original version
-    residuals = pd.read_pickle(
-        os.path.join(original_data_folder, "working", "residuals.p")
-    )
+    start_date, end_date = get_start_end_date(df)
+    print(f"Start date: {start_date/4} to End Date: {end_date/4}\n\n")
+
+    # Get weights
+    print("Getting residuals")
+    residuals = load_residuals(prev_data_folder)
     df = add_weights(df, residuals)
 
+    df.drop(df[df.years_held < 2].index, inplace=True)
+
     # Process all new extensions + any extensions in the last year
-    old_df = pd.read_pickle(
-        os.path.join(prev_data_folder, "clean", "leasehold_flats.p")
-    )
     extensions = df[df.extension].merge(
         old_df[["property_id", "date_trans"]],
         on=["property_id", "date_trans"],
@@ -863,23 +872,19 @@ def update_rsi(
     ].copy()
     controls = df.drop(df[(df.extension)].index)
 
-    print("\n\nExtensions:")
-    print(extensions)
-    print("Min date:", extensions.date_trans.min())
-    print("Max date:", extensions.date_trans.max())
+    print(f"Num extensions: {len(extensions)}")
+    print(f"Num controls: {len(controls)}")
 
-    print("\n\nControls:")
-    print(controls)
-
-    # Construct RSI
     rsi = get_rsi(
         extensions,
         controls,
         start_date=start_date,
         end_date=end_date,
         case_shiller=True,
+        n_jobs=n_jobs,
     )
-    rsi.to_pickle(os.path.join(data_folder, "clean", "rsi.p"))
+
+    rsi.to_pickle(os.path.join(data_folder, "working", "rsi.p"))
 
 
 # %%

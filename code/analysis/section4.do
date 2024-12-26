@@ -3,80 +3,14 @@
 * By Verónica Bäcker-Peral, Jonathon Hazell, and Atif Mian
 **************************************************************************************
 
-use "$working/experiment_pids.dta", clear
-gegen experiment=group(experiment_pid experiment_date)
-rename date date_trans
-
-drop if experiment_pid==property_id & type=="control"
-gen extension=type=="extension"
-
-merge m:1 property_id date_trans using "$clean/leasehold_flats", keepusing(bedrooms bathrooms livingrooms floorarea age log_rent date_bedrooms date_bathrooms date_livingrooms date_floorarea date_yearbuilt date_rent L_bedrooms L_bathrooms L_livingrooms L_floorarea L_log_rent L_date_bedrooms L_date_bathrooms L_date_livingrooms L_date_floorarea L_date_yearbuilt L_date_rent L_date_trans) nogen keep(match)
-
-merge m:1 property_id date_trans using "$working/renovations", keepusing(date_rm renovated) nogen keep(master match)
-
-rename (property_id date_trans) (property_id_c date_trans_c)
-rename (experiment_pid experiment_date) (property_id date_trans)
-
-merge m:1 property_id date_trans using "$clean/experiments", keepusing(k90 date_extended) nogen keep(match)
-
-label var floorarea "Floor Area"
-label var log_rent "Log Rent"
-label var bathrooms "Bathrooms"
-label var bedrooms "Bedrooms"
-label var livingrooms "Living Rooms"
-label var age "Property Age"
-
-************************************
-* Appendix Figure ??: Density plots 
-************************************
-
-gen date_age = date_yearbuilt
-foreach var in bedrooms bathrooms livingrooms floorarea age rent {
-	gen year_`var' = year(date_`var')
-}
-
-foreach var of varlist bedrooms bathrooms livingrooms floorarea age log_rent {
-		preserve
-		drop if missing(`var')
-		
-		cap drop `var'_res
-		
-		qui: gen temp=`var' if extension 
-		qui: gegen temp=mean(temp), by(experiment) replace 
-		qui: drop if missing(temp)
-		qui: drop temp
-		
-		qui: gen temp=`var' if !extension 
-		qui: gegen temp=mean(temp), by(experiment) replace 
-		qui: drop if missing(temp)
-		qui: drop temp
-		
-		count
-		
-		if "`var'" == "log_rent" qui reghdfe `var' , absorb(i.experiment#i.year_rent) residuals(`var'_res)
-		else qui reghdfe `var', absorb(i.experiment#i.year_`var') residuals(`var'_res)
-		
-		local lab: variable label `var'
-		local title "`lab', Residualized"
-		
-		twoway (kdensity `var'_res if extension, bwidth(1) kernel(gaussian) lcolor("$accent1")) ///
-			 (kdensity `var'_res if !extension, bwidth(1) kernel(gaussian) lcolor(gs4) lpattern(dash)), ///
-			ytitle("Density") ///
-			xtitle("`title'") ///
-			legend(order(1 "Extended" 2 "Not Extended"))
-		graph export "$fig/`var'_kdensity.png", replace  
-	restore
-}
+*******************************
+* Table ?: Balance Test
+********************************
 
 *******************************
 * Table 2: Placebo Test
 ********************************
-foreach var of varlist bedrooms bathrooms livingrooms floorarea {
-	gen d_`var' = `var' - L_`var' if date_`var' > date_extended & date_extended > L_date_`var' & `var'>=L_`var' 
-}
-
-gen n=_n
-gcollapse d_* renovated (count) n n_bed=d_bedrooms, by(experiment extension)
+use "$clean/renovations_by_experiment.dta", clear
 
 eststo clear
 foreach var of varlist renovated d_* {
@@ -98,9 +32,9 @@ esttab using "$tab/placebo_test.tex", ///
 * Table 3: Rent Growth
 *************************************
 
-use "$working/experiment_rent_panel.dta", clear
-replace d_log_rent = d_log_rent_res
-replace d_log_rent_ann = d_log_rent_res /((date_rm-L_date_rm)/365)
+use "$clean/experiment_rent_panel.dta", clear
+replace d_log_rent = d_log_rent_res_trans
+replace d_log_rent_ann = d_log_rent_res_trans /((date_rm-L_date_rm)/365)
 keep if  year_rm<=year & L_year_rm>=L_year // Keep rental listings within experiment window
 
 gen control = type=="control"
@@ -120,18 +54,10 @@ distinct experiment if e(sample)
 estadd local exp_count = string(r(ndistinct), "%9.0fc"), replace
 
 // RSI version
-import delimited "$working/rsi/rsi_rent_resid.csv", clear case(preserve)
-replace d_log_rent = d_log_rent_res
-gen date_rm_ = date(date_rm, "DMY")
-gen L_date_rm_ = date(L_date_rm, "DMY")
-drop date_rm L_date_rm 
-rename (date_rm_ L_date_rm_) (date_rm L_date_rm )
- 
-drop date_extended
-joinby property_id using "$clean/experiments.dta"
+use "$clean/rent_rsi.dta", clear
 gegen experiment=group(property_id date_trans)
 
-keep experiment property_id year_rm L_year_rm year L_year d_log_rent d_rsi date_rm L_date_rm date_trans L_date_trans
+keep experiment property_id year_rm L_year_rm year L_year d_log_rent_res d_rsi_rent_resid date* L_date*
 rename d_log_rent d_log_rentextension
 rename d_rsi d_log_rentcontrol
 
@@ -161,13 +87,12 @@ esttab using "$tab/within_experiment_rent_growth.tex", ///
 * Figure 5: Rent Growth
 *************************************
 
-import delimited "$working/rsi/rsi_rent.csv", clear case(preserve)
-replace d_log_rent = d_log_rent_res
-
-drop date_extended
-joinby property_id using "$clean/experiments.dta"
-
+use "$clean/rent_rsi.dta", clear
 gegen experiment=group(property_id date_trans)
+replace d_log_rent = d_log_rent_res 
+gen d_rsi = d_rsi_rent_resid
+
+// gen d_rsi = d_rsi_rent
 
 // Remove outliers as in main analysis
 gen did = d_log_rent - d_rsi 

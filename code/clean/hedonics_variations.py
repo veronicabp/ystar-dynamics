@@ -95,3 +95,191 @@ def get_rsi_hedonic_variations(
         if rank == 0:
             combined_rsi = pd.concat(rsi_gather)
             combined_rsi.to_pickle(output_file)
+
+
+def estimate_cs_stability(data_folder):
+    hedonics = pd.read_pickle(
+        os.path.join(data_folder, "working", "merged_hmlr_hedonics.p")
+    )
+
+    # Drop freeholds that switch between leasehold and freehold, because these may be transactions of the underlying freehold
+    hedonics["freehold"] = hedonics["freehold"].astype(int)
+    hedonics["tot_freehold"] = hedonics.groupby("property_id")["freehold"].transform(
+        "sum"
+    )
+    hedonics["num_obs"] = hedonics.groupby("property_id")["freehold"].transform("count")
+
+    hedonics.drop(
+        hedonics[
+            (hedonics.freehold == 1) & (hedonics.tot_freehold != hedonics.num_obs)
+        ].index,
+        inplace=True,
+    )
+
+    hedonics.drop(hedonics[hedonics.year < 2000].index, inplace=True)
+
+    # We need at least one freehold and one non freehold by quarter-postcode group
+    group_vars = ["outcode", "year", "quarter"]
+    hedonics["pct_freehold"] = hedonics.groupby(group_vars)["freehold"].transform(
+        "mean"
+    )
+    hedonics.drop(
+        hedonics[(hedonics.pct_freehold == 0) | (hedonics.pct_freehold == 1)].index,
+        inplace=True,
+    )
+
+    hedonics_cols = ["log_price"] + [
+        col
+        for col in hedonics.columns
+        if col.startswith("pres") or col.startswith("tpres")
+    ]
+
+    leaseholds = hedonics.drop(hedonics[hedonics.freehold == 1].index)
+    freeholds = hedonics.drop(hedonics[hedonics.freehold == 0].index)
+
+    fh_means = (
+        freeholds.groupby(group_vars)[
+            hedonics_cols
+        ]  # group by your group_vars on the hedonic cols
+        .mean()
+        .reset_index()  # so you can merge
+    )
+
+    leaseholds = pd.merge(leaseholds, fh_means, on=group_vars, suffixes=("", "_fh"))
+
+    new_columns = {
+        f"{col}_discount": leaseholds[col] - leaseholds[f"{col}_fh"]
+        for col in hedonics_cols
+    }
+
+    # Create all new columns at once
+    leaseholds = leaseholds.assign(**new_columns)
+
+    leaseholds = leaseholds[
+        ["property_id", "log_price", "duration"]
+        + group_vars
+        + [c for c in leaseholds.columns if c.endswith("_discount")]
+    ]
+
+    leaseholds["T"] = leaseholds["duration"]
+    leaseholds["k"] = 1000
+
+    def fh_discount_function(ystar, T, k):
+        exponent = (ystar / 100) * T
+        return np.log(np.clip(1 - np.exp(-exponent), 1e-15, None))
+
+    ystars = []
+    ses = []
+    variations = []
+    time_interaction = []
+
+    ystar, se = estimate_ystar(
+        leaseholds.copy(),
+        lhs_var=f"log_price_discount",
+        model_function=fh_discount_function,
+        get_se=False,
+    )
+    ystars.append(ystar)
+    ses.append(se)
+    variations.append("None")
+    time_interaction.append(False)
+
+    for col in tqdm(hedonics_cols):
+        ystar, se = estimate_ystar(
+            leaseholds.copy(),
+            lhs_var=f"{col}_discount",
+            model_function=fh_discount_function,
+            get_se=False,
+        )
+
+        ystars.append(ystar)
+        ses.append(se)
+        variations.append(
+            col.replace("_discount", "").replace("tpres_", "").replace("pres_", "")
+        )
+        time_interaction.append(col.startswith("tpres"))
+
+    results = pd.DataFrame(
+        {
+            "ystar": ystars,
+            "se": ses,
+            "variation": variations,
+            "time_interaction": time_interaction,
+        }
+    )
+
+    results.to_pickle(
+        os.path.join(data_folder, "working", "cross_sectional_stability.p")
+    )
+
+
+def estimate_qe_stability(data_folder):
+
+    df = pd.read_pickle(os.path.join(data_folder, "clean", "experiments.p"))[
+        ["property_id", "date_trans", "T", "k", "did_rsi"]
+    ]
+
+    hedonics_folder = os.path.join(data_folder, "working", "hedonics_variations")
+
+    ystars = []
+    ses = []
+    variations = []
+    time_interaction = []
+
+    # Baseline
+    ystar, se = estimate_ystar(
+        df,
+        get_se=False,
+    )
+
+    ystars.append(ystar)
+    ses.append(se)
+    variations.append("None")
+    time_interaction.append(False)
+
+    for rsi_file in tqdm(sorted(os.listdir(hedonics_folder))):
+
+        if not rsi_file.endswith(".p"):
+            continue
+
+        rsi = pd.read_pickle(os.path.join(hedonics_folder, rsi_file))
+        rsi["did"] = rsi["d_pres"] - rsi["d_rsi"]
+
+        df_ = df.merge(rsi, on=["property_id", "date_trans"])
+
+        ystar, se = estimate_ystar(
+            df_,
+            lhs_var=f"did",
+            get_se=False,
+        )
+
+        ystars.append(ystar)
+        ses.append(se)
+        variations.append(
+            rsi_file.replace(".p", "")
+            .replace("rsi_", "")
+            .replace("tpres_", "")
+            .replace("pres_", "")
+        )
+        time_interaction.append(rsi_file.startswith("rsi_tpres"))
+
+    results = pd.DataFrame(
+        {
+            "ystar": ystars,
+            "se": ses,
+            "variation": variations,
+            "time_interaction": time_interaction,
+        }
+    )
+
+    results.to_pickle(
+        os.path.join(data_folder, "working", "quasi_experimental_stability.p")
+    )
+
+
+def get_hedonics_variations(data_folder):
+    print("Quasi Experimental Stability:")
+    estimate_qe_stability(data_folder)
+
+    print("Cross Sectional Stability:")
+    estimate_cs_stability(data_folder)

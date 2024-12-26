@@ -6,7 +6,14 @@
 *************************************
 * Figure 6: Event Study
 *************************************
-use "$working/for_event_study.dta", clear
+use "$clean/ystar_estimates.dta", clear
+keep if freq=="annual" | freq=="2000-2003"
+rename date year
+keep year ystar
+tempfile ystar_yearly
+save `ystar_yearly'
+
+use "$clean/for_event_study.dta", clear
 // keep if round(extension_amount, 5)==90
 
 // Set level to 0 in year before extension
@@ -33,7 +40,7 @@ gen ub = diff + 1.96*se
 gen lb = diff - 1.96*se
 
 replace year=round(year)
-merge m:1 year using "$clean/ystar_yearly.dta", nogen keep(match)
+merge m:1 year using `ystar_yearly', nogen keep(match)
 gen pred_y =  ln(1-exp(-(ystar/100) *(T + k))) - ln(1-exp(-(ystar/100) *(T)))
 
 gsort time
@@ -132,37 +139,31 @@ graph export "$fig/yield_curve_3period_k90.png", replace
 * Figure 9: Real-time estimates
 *************************************
 
-use "$clean/ystar_monthly.dta", clear
-merge 1:m year month using "$clean/uk_interest_rates.dta", keep(match)
-drop if year<2016
-
-gen xaxis=xaxis12/12
+use "$clean_update/ystar_monthly_estimates.dta", clear
+merge 1:m year month using "$clean/uk_interest_rates.dta", keep(match master)
+gen xaxis = year + (month-1)/12
 
 // With forward rate
 twoway 	(line 		ystar xaxis									, yaxis(1) lpattern(solid) lcolor(gs10)) ///
-		(rarea 		ub lb xaxis if xaxis12<$year1 * 12 + $month1 - 1	, yaxis(1) color(gs10%30) lcolor(%0)) ///
+		(rarea 		ub lb xaxis if _n!=_N, yaxis(1) color(gs10%30) lcolor(%0)) ///
 		(scatter 	ystar xaxis									, yaxis(1) mcolor(black) msymbol(O)) ///
-		(scatter 	ystar xaxis if xaxis12==$year1 * 12 + $month1 - 1	, yaxis(1) mcolor("$accent1") msymbol(O)) ///
-		(line 		uk10y20_real xaxis										, yaxis(2) lcolor(gs4) lpattern(shortdash)) ///
-																if xaxis12 >= 2016*12, ///
+		(scatter 	ystar xaxis if _n==_N	, yaxis(1) mcolor("$accent1") msymbol(O)) ///
+		(line 		uk10y20_real xaxis										, yaxis(2) lcolor(gs4) lpattern(shortdash)) , ///
 		legend(order(3 "y* (Left Axis)" 5 "10 Year 20 Real Forward Rate (Right Axis)") ring(0) position(11)) ///
 		xtitle("") ytitle("", axis(1)) ytitle("", axis(2)) ///
 		ylabel(2(1)7, axis(1)) ylabel(-2.5(1)2.5, axis(2)) ///
-		xlabel(2016 "2016, Q1" 2018 "2018, Q1" 2020 "2020, Q1" 2022 "2022, Q1" 2024 "2024, Q1" 2025 " ") ///
-		text(2.35 2024.3 "$month1_str" "$year1", color("$accent1") size(smal))
+		xlabel(2016 "2016, Q1" 2018 "2018, Q1" 2020 "2020, Q1" 2022 "2022, Q1" 2024 "2024, Q1" 2025.6 " ") ///
+		text(2.35 2025.2 "$month1_str" "$year1", color("$accent1") size(smal))
 graph export "$fig/realtime_updates_with_forward_monthly.png", replace
 
 *************************************
 * Figure 10: y* stability
 *************************************
 
-use "$clean/quasi_experimental_stability.dta", clear
-rename ystar ystar_qe 
-merge 1:1 controls time_interaction using "$clean/cross_sectional_stability.dta"
-rename ystar ystar_cs
+use "$clean/hedonics_variations.dta", clear
 
-gen special = inlist(controls, "none", "linear", "all", "quad", "allgms")
-replace ystar_qe = . if controls=="allgms"
+gen special = inlist(variation, "None", "linear", "all", "quad", "all_gms")
+replace ystar_qe = . if variation=="all_gms"
 
 foreach tag in "cs" "qe" {
 	egen ystar_`tag'_max = max(ystar_`tag'), by(time_interaction)
@@ -183,18 +184,18 @@ twoway 	(scatter yaxis_cs ystar_cs if !special, mcolor(gs4%5) msymbol(o) msize(h
 		(scatter yaxis_qe ystar_qe if !special, mcolor(gs4%1) msymbol(o) msize(huge) lcolor(black)) ///
 		(rcap ystar_cs_max ystar_cs_min yaxis_cs, lcolor(black) lpattern(dash) horizontal) ///
 		(rcap ystar_qe_max ystar_qe_min yaxis_qe, lcolor(black) lpattern(solid) horizontal) ///
-		(scatter yaxis_cs ystar_cs if controls=="quad", mcolor("0 150 255") msymbol(O) msize(large) mlcolor(black)) ///
-		(scatter yaxis_cs ystar_cs if controls=="linear", mcolor("0 200 255") msymbol(O) msize(large) mlcolor(black)) ///
-		(scatter yaxis_cs ystar_cs if controls=="none", mcolor("0 255 255") msymbol(O) msize(large) mlcolor(black)) ///	
-		(scatter yaxis_cs ystar_cs if controls=="all", mcolor("0 0 255") msymbol(O) msize(large) mlcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if controls=="quad", mcolor("0 150 255") msymbol(O) msize(small) mlcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if controls=="linear", mcolor("0 200 255") msymbol(O) msize(small) mlcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if controls=="none", mcolor("0 255 255") msymbol(O) msize(small) mlcolor(black)) ///	
-		(scatter yaxis_qe ystar_qe if controls=="all", mcolor("0 0 255") msymbol(O) msize(small) mlcolor(black) mlcolor(black)) ///
+		(scatter yaxis_cs ystar_cs if variation=="quad", mcolor("0 150 255") msymbol(O) msize(large) mlcolor(black)) ///
+		(scatter yaxis_cs ystar_cs if variation=="linear", mcolor("0 200 255") msymbol(O) msize(large) mlcolor(black)) ///
+		(scatter yaxis_cs ystar_cs if variation=="None", mcolor("0 255 255") msymbol(O) msize(large) mlcolor(black)) ///	
+		(scatter yaxis_cs ystar_cs if variation=="all", mcolor("0 0 255") msymbol(O) msize(large) mlcolor(black)) ///
+		(scatter yaxis_qe ystar_qe if variation=="quad", mcolor("0 150 255") msymbol(O) msize(small) mlcolor(black)) ///
+		(scatter yaxis_qe ystar_qe if variation=="linear", mcolor("0 200 255") msymbol(O) msize(small) mlcolor(black)) ///
+		(scatter yaxis_qe ystar_qe if variation=="None", mcolor("0 255 255") msymbol(O) msize(small) mlcolor(black)) ///	
+		(scatter yaxis_qe ystar_qe if variation=="all", mcolor("0 0 255") msymbol(O) msize(small) mlcolor(black) mlcolor(black)) ///
 		(scatter yaxis_gms_estimate gms_estimate, msymbol(S) mcolor(black)  msize(medium)) ///
 		(scatter yaxis_gms_estimate gms_estimate, msymbol(X) mcolor(gold)  msize(medium)) ///
-		(scatter yaxis_cs ystar_cs if controls=="allgms", msymbol(S) mcolor(black)  msize(medium)) ///
-		(scatter yaxis_cs ystar_cs if controls=="allgms", mcolor(red) msymbol(X) msize(medium)) if time_interaction==0, ///
+		(scatter yaxis_cs ystar_cs if variation=="all_gms", msymbol(S) mcolor(black)  msize(medium)) ///
+		(scatter yaxis_cs ystar_cs if variation=="all_gms", mcolor(red) msymbol(X) msize(medium)) if time_interaction==0, ///
 		legend(order(7 "No Controls" 6 "Linear" 5 "Quadratic" 8 "Fixed Effects") position(0) bplacement(seast) cols(1) size(*0.8)) ///
 		yscale(range(0.6(0.1)1.2)) ///
 		xtitle("Estimated y*") ytitle("") ///
@@ -205,20 +206,11 @@ twoway 	(scatter yaxis_cs ystar_cs if !special, mcolor(gs4%5) msymbol(o) msize(h
 graph export "$fig/ystar_stability.png", replace
 
 
-twoway 	(scatter yaxis_cs ystar_cs if !special, mcolor(gs4%5) msymbol(o) msize(huge) lcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if !special, mcolor(gs4%1) msymbol(o) msize(huge) lcolor(black)) ///
-		(rcap ystar_cs_max ystar_cs_min yaxis_cs if time_interaction==1, lcolor(black) lpattern(dash) horizontal) ///
-		(rcap ystar_qe_max ystar_qe_min yaxis_qe if time_interaction==1, lcolor(black) lpattern(solid) horizontal) ///
-		(scatter yaxis_cs ystar_cs if controls=="none", mcolor("0 255 255") msymbol(O) msize(large) mlcolor(black)) ///	
-		(scatter yaxis_cs ystar_cs if controls=="linear", mcolor("0 200 255") msymbol(O) msize(large) mlcolor(black)) ///
-		(scatter yaxis_cs ystar_cs if controls=="quad", mcolor("0 150 255") msymbol(O) msize(large) mlcolor(black)) ///
-		(scatter yaxis_cs ystar_cs if controls=="all", mcolor("0 0 255") msymbol(O) msize(large) mlcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if controls=="none", mcolor("0 255 255") msymbol(O) msize(small) mlcolor(black)) ///	
-		(scatter yaxis_qe ystar_qe if controls=="linear", mcolor("0 200 255") msymbol(O) msize(small) mlcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if controls=="quad", mcolor("0 150 255") msymbol(O) msize(small) mlcolor(black)) ///
-		(scatter yaxis_qe ystar_qe if controls=="all", mcolor("0 0 255") msymbol(O) msize(small) mlcolor(black) mlcolor(black)) ///
-		if (time_interaction==1 | controls=="none"), ///
-		legend(order(5 "None" 6 "Linear x Year" 7 "Quadratic x Year" 8 "Fixed Effects x Year") position(0) bplacement(seast) cols(1) size(*0.8)) ///
+twoway 	(scatter yaxis_cs ystar_cs, mcolor(gs4%5) msymbol(o) msize(huge) lcolor(black)) ///
+		(scatter yaxis_qe ystar_qe, mcolor(gs4%1) msymbol(o) msize(huge) lcolor(black)) ///
+		(rcap ystar_cs_max ystar_cs_min yaxis_cs, lcolor(black) lpattern(dash) horizontal) ///
+		(rcap ystar_qe_max ystar_qe_min yaxis_qe, lcolor(black) lpattern(solid) horizontal) if time_interaction==1, ///
+		legend(off) ///
 		yscale(range(0.6(0.1)1.2)) ///
 		xtitle("Estimated y*") ytitle("") ///
 		ylabel(0.5 " " 0.75 `""Quasi" "Experimental""' 1 `""Cross" " Sectional""' 1.25 " ") ////

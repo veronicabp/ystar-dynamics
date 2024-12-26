@@ -62,7 +62,7 @@ def create_experiments(df_main, rsi_dfs, data_folder):
     # Set would-have-been duration
     df_main["T"] = df_main["whb_duration"]
     df_main["T_at_ext"] = df_main["L_duration"] - (
-        (df_main["L_date_trans"] - df_main["date_extended"].dt.to_timestamp()).dt.days
+        (df_main["date_extended"].dt.to_timestamp() - df_main["L_date_trans"]).dt.days
         / 365.25
     )
     df_main["T5"] = df_main["T"].apply(lambda x: 5 * round(x / 5))
@@ -81,13 +81,37 @@ def create_experiments(df_main, rsi_dfs, data_folder):
     df_main["year2"] = (df_main["year"] // 2) * 2
     df_main["year5"] = (df_main["year"] // 5) * 5
 
-    # # Merge in hazard rate
-    # df_main["whb_duration"] = df_main["whb_duration"].round()
-    # df_hazard = pd.read_pickle(os.path.join(data_folder, "clean", "hazard_rate.p"))
-    # df_main = df_main.merge(df_hazard, on="whb_duration", how="left")
-    # df_main["Pi"] = df_main["cum_prob"] / 100
-    # df_main["Pi"] = df_main["Pi"].fillna(0)
-    # df_main.drop(columns=["cum_prob"], inplace=True)
+    # Merge in hazard rate
+    df_main["whb_duration"] = df_main["whb_duration"].round()
+    df_hazard = pd.read_pickle(os.path.join(data_folder, "clean", "hazard_rate.p"))
+    df_main = df_main.merge(df_hazard, on="whb_duration", how="left")
+    df_main["Pi"] = df_main["cum_prob"] / 100
+    df_main["Pi"] = df_main["Pi"].fillna(0)
+    df_main.drop(columns=["cum_prob"], inplace=True)
+
+    # Remove 1% of outliers
+    for col in df_main.columns:
+        if col.startswith("did"):
+            lower = df_main[col].quantile(0.005)
+            upper = df_main[col].quantile(0.995)
+            df_main[f"{col}_win"] = df_main[col].clip(lower, upper)
+            df_main.loc[df_main[col] != df_main[f"{col}_win"], col] = np.nan
+
+    # # Remove 1% of outliers by year
+    # for col in df_main.columns:
+    #     if col.startswith("did"):
+    #         # Apply the clipping operation by year
+    #         def clip_by_group(group):
+    #             lower = group[col].quantile(0.005)
+    #             upper = group[col].quantile(0.995)
+    #             group[f"{col}_win"] = group[col].clip(lower, upper)
+    #             group.loc[group[col] != group[f"{col}_win"], col] = np.nan
+    #             return group
+
+    #         # Use groupby to apply the clipping operation per year
+    #         df_main = (
+    #             df_main.groupby("year").apply(clip_by_group).reset_index(drop=True)
+    #         )
 
     # Keep sample period
     df_main = df_main[df_main["year"] >= 2000]
@@ -100,14 +124,6 @@ def create_experiments(df_main, rsi_dfs, data_folder):
         df_main["date_extended"] - df_main["L_date_trans"].dt.to_period("D")
     )
     df_main = df_main[df_main["years_diff"] > 1 / 12]
-
-    # Remove 1% of outliers
-    for col in df_main.columns:
-        if col.startswith("did_rsi"):
-            lower = df_main[col].quantile(0.005)
-            upper = df_main[col].quantile(0.995)
-            df_main[f"{col}_win"] = df_main[col].clip(lower, upper)
-            df_main.loc[df_main[col] != df_main[f"{col}_win"], col] = np.nan
 
     # Create version without flippers
     df_flip = df_main.copy()
@@ -171,13 +187,48 @@ def run_create_experiments(data_folder):
     extensions = df.drop(df[~df.extension].index)
 
     rsi_dfs = []
-    for tag in ["", "_bmn", "_yearly", "_postcode", "_hedonics"]:
+    for tag in ["", "_bmn", "_yearly", "_postcode", "_hedonics", "_nocons", "_flip"]:
         print(f">Loading rsi{tag}")
         rsi = pd.read_pickle(os.path.join(data_folder, "working", f"rsi{tag}.p"))
         rsi_clean = clean_rsi(rsi, tag)
         rsi_dfs.append(rsi_clean)
 
-    df_main, df_flip, df_public = create_experiments(extensions, rsi_dfs, data_folder)
+    rc = pd.read_pickle(os.path.join(data_folder, "working", f"restrictive_controls.p"))
+    rc_clean = clean_rsi(rc.rename(columns={"d_log_price_ctrl": "d_rsi"}), "_rc")
+    rc_clean.rename(
+        columns={col: col.replace("_rsi", "") for col in rc_clean.columns}, inplace=True
+    )
+
+    df_main, df_flip, df_public = create_experiments(
+        extensions, rsi_dfs + [rc_clean], data_folder
+    )
     df_main.to_pickle(os.path.join(data_folder, "clean", "experiments.p"))
     df_flip.to_pickle(os.path.join(data_folder, "clean", "experiments_flip.p"))
     df_public.to_pickle(os.path.join(data_folder, "clean", "experiments_public.p"))
+
+
+def update_create_experiments(data_folder, prev_data_folder):
+    print("Creating experiments final dataset.")
+    df = pd.read_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
+    extensions = df.drop(df[~df.extension].index)
+
+    rsi = pd.read_pickle(os.path.join(data_folder, "working", f"rsi.p"))
+    rsi_clean = clean_rsi(rsi, "")
+    df_main, _, _ = create_experiments(extensions, [rsi_clean], data_folder)
+
+    # Merge with previous extensions
+    df_main.drop(df_main[df_main.did_rsi.isna()].index, inplace=True)
+    df_main_old = pd.read_pickle(
+        os.path.join(prev_data_folder, "clean", "experiments.p")
+    )
+    df_main_old = df_main_old.merge(
+        df_main[["property_id", "date_trans"]],
+        on=["property_id", "date_trans"],
+        how="left",
+        indicator=True,
+    )
+    df_main_old = df_main_old[df_main_old._merge == "left_only"]
+
+    df_main = pd.concat([df_main, df_main_old])
+
+    df_main.to_pickle(os.path.join(data_folder, "clean", "experiments.p"))

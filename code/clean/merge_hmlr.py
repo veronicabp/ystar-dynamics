@@ -2,6 +2,34 @@
 from utils import *
 from clean.fuzzy_merge import *
 
+lightweight_cols = [
+    "property_id",
+    "date_trans",
+    "L_date_trans",
+    "year",
+    "L_year",
+    "quarter",
+    "L_quarter",
+    "years_held",
+    "d_log_price",
+    "d_pres_linear",
+    "d_pres_main",
+    "area",
+    "postcode",
+    "extension",
+    "latitude",
+    "longitude",
+    "duration2023",
+    "whb_duration",
+    "date_extended",
+    "extension_amount",
+    "duration",
+    "L_duration",
+    "number_years",
+    "date_from",
+    "not_valid_ext",
+]
+
 
 # %%
 def get_lease_for_merge(lease_data):
@@ -70,8 +98,8 @@ def additional_cleaning(df, original_data_folder):
     )
     df["duration"] = df.number_years - df.years_elapsed
 
-    df["incode"] = df["postcode"].str.extract(r"^([A-Z]{1,2}[0-9R][0-9A-Z]?)")
-    df["outcode"] = df["postcode"].str.extract(r"([0-9][A-Z]{2})$")
+    df["outcode"] = df["postcode"].str.extract(r"^([A-Z]{1,2}[0-9R][0-9A-Z]?)")
+    df["incode"] = df["postcode"].str.extract(r"([0-9][A-Z]{2})$")
     df["area"] = df["postcode"].str.extract(r"^([A-Z]{1,2})")
     df["sector"] = df["postcode"].str.extract(r"^([A-Z]{1,2}[0-9R][0-9A-Z]?\s[0-9])")
 
@@ -123,6 +151,7 @@ def additional_cleaning(df, original_data_folder):
         "sector",
         "city",
         "county",
+        "region",
         "district",
         "has_been_extended",
         "extension",
@@ -182,7 +211,7 @@ def merge_rightmove(hmlr_data, data_folder):
     print("Number of rows (HMLR):", len(hmlr_data.index))
 
     rightmove_data = pd.read_pickle(
-        os.path.join(data_folder, "working", "rightmove_for_merge_flats.p")
+        os.path.join(data_folder, "working", "rightmove_for_merge.p")
     )
     print("Number of rows (Rightmove):", len(rightmove_data.index))
 
@@ -334,8 +363,21 @@ def get_time_on_market(df, merge_keys, data_folder):
     merged["price_change_pct"] = (
         100 * (merged.listprice1 - merged.listprice0) / merged.listprice0
     )
+    merged["time_from_listing"] = np.where(
+        merged.date_trans > merged.date_rm,
+        (merged.date_trans - merged.date_rm).dt.days,
+        np.nan,
+    )
     df = df.merge(
-        merged[["property_id", "date_trans", "time_on_market", "price_change_pct"]],
+        merged[
+            [
+                "property_id",
+                "date_trans",
+                "time_on_market",
+                "time_from_listing",
+                "price_change_pct",
+            ]
+        ],
         on=["property_id", "date_trans"],
         how="left",
     )
@@ -366,14 +408,38 @@ def create_interactions(df, vars_list, interaction_var):
     return df, new_vars
 
 
+def get_latitude_longitude(df, merge_keys, data_folder):
+    hedonics = pd.read_pickle(
+        os.path.join(data_folder, "working", "rightmove_sales_flats.p")
+    )
+
+    hedonics = hedonics.merge(
+        merge_keys[["property_id", f"property_id_rm"]],
+        on=f"property_id_rm",
+        how="inner",
+    )
+
+    merged = get_closest_match(df, hedonics, "date_rm")
+    df = df.merge(
+        merged[["property_id", "date_trans", "latitude", "longitude"]],
+        on=["property_id", "date_trans"],
+        how="left",
+    )
+
+    df["latitude"] = pd.to_numeric(df["latitude"], errors="coerce")
+    df["longitude"] = pd.to_numeric(df["longitude"], errors="coerce")
+
+    return df
+
+
 def merge_with_hedonics(df, data_folder):
 
     # Get hedonics merge keys
-    df["address"] = df.swifter.apply(
+    hmlr_for_merge = df[["uprn", "property_id", "postcode"]].copy()
+    hmlr_for_merge.drop_duplicates(inplace=True)
+    hmlr_for_merge["address"] = hmlr_for_merge.swifter.apply(
         lambda row: row.property_id.replace(row.postcode, "").strip(), axis=1
     )
-    hmlr_for_merge = df[["uprn", "property_id", "postcode", "address"]].copy()
-    hmlr_for_merge.drop_duplicates(inplace=True)
 
     rm_keys = merge_rightmove(hmlr_for_merge, data_folder)
     zoopla_keys = merge_zoopla(hmlr_for_merge, data_folder)
@@ -451,6 +517,9 @@ def merge_with_hedonics(df, data_folder):
 
     ##### Get time on market
     df = get_time_on_market(df, rm_keys, data_folder)
+
+    ##### Get latitude/longitude
+    df = get_latitude_longitude(df, rm_keys, data_folder)
 
     ##### Other edits
     df.rename(
@@ -667,7 +736,7 @@ def finalize_data(df, original_data_folder):
     lat_lon = pd.read_stata(
         os.path.join(original_data_folder, "raw", "geography", "ukpostcodes.dta")
     )
-    df = df.merge(lat_lon, on="postcode", how="left")
+    df = df.merge(lat_lon, on="postcode", how="inner")
 
     if "lat_rm" in df.columns:
         df.loc[
@@ -719,6 +788,7 @@ def finalize_data(df, original_data_folder):
             or col.startswith("uk")
         ]
         + hedonics_rm
+        + ["age"]
     )
 
     # Create all new columns in one go
@@ -753,7 +823,9 @@ def finalize_data(df, original_data_folder):
         & (~df["duration"].isna())
     )
     df["extension_amount"] = np.where(
-        df["extension"], df["duration"] - df["L_duration"] + df["years_held"], np.nan
+        df["extension"],
+        df["duration"] - df["L_duration"] + df["years_held"],
+        df.extension_amount,
     )
 
     df["not_valid_ext"] = (
@@ -835,8 +907,10 @@ def finalize_data(df, original_data_folder):
         df[f"{var}20yr"] = df[var].round(20)
         df[f"{var}p1000"] = df[var] / 1000
 
-    df["duration2023"] = df["number_years"] - np.floor(
-        years_between_dates(pd.Period("2023-01-01", freq="D") - df.date_from)
+    # Get duration on Jan 1, 2023, so that we can compare duration across properties transacted in different years
+    jan2023 = pd.Period("2023-01-01", freq="D")
+    df["duration2023"] = df["number_years"] - df.apply(
+        lambda row: num_full_years(row.date_from, jan2023), axis=1
     )
     df.loc[df.extension, "duration2023"] = df.duration2023 - df.extension_amount
     df["duration2023"] = df["duration2023"].round()
@@ -846,6 +920,13 @@ def finalize_data(df, original_data_folder):
     return df
 
 
+def num_full_years(start, end):
+    years_diff = end.year - start.year
+    if end.month < start.month or (end.month == start.month and end.day < start.day):
+        years_diff -= 1
+    return years_diff
+
+
 def convert_hedonics_data(data_folder):
     hedonics_folder = os.path.join(data_folder, "working", "hedonics")
     for file in sorted(os.listdir(hedonics_folder)):
@@ -853,76 +934,110 @@ def convert_hedonics_data(data_folder):
         df = pd.read_stata(os.path.join(hedonics_folder, file))
         df.to_pickle(os.path.join(data_folder, "working", file.replace(".dta", ".p")))
 
+    # Rightmove
+    rightmove_sales = pd.read_pickle(
+        os.path.join(data_folder, "working", "rightmove_sales_flats.p")
+    )
+    rightmove_rent = pd.read_pickle(
+        os.path.join(data_folder, "working", "rightmove_rents_flats.p")
+    )
+    rightmove = pd.concat([rightmove_sales, rightmove_rent])
+    rightmove_for_merge = (
+        rightmove[["property_id_rm", "postcode_rm", "uprn", "address1"]]
+        .rename(columns={"property_id_rm": "property_id", "postcode_rm": "postcode"})
+        .drop_duplicates()
+    )
+    rightmove_for_merge.to_pickle(
+        os.path.join(data_folder, "working", "rightmove_for_merge.p")
+    )
+
+    # Zoopla
+    zoopla_sales = pd.read_pickle(
+        os.path.join(data_folder, "working", "zoopla_sales_flats.p")
+    )
+    zoopla_rent = pd.read_pickle(
+        os.path.join(data_folder, "working", "zoopla_rents_flats.p")
+    )
+    zoopla = pd.concat([zoopla_sales, zoopla_rent])
+    zoopla_for_merge = (
+        zoopla[["property_id_zoop", "postcode", "property_number"]]
+        .rename(columns={"property_id_zoop": "property_id"})
+        .drop_duplicates()
+    )
+    zoopla_for_merge.to_pickle(
+        os.path.join(data_folder, "working", "zoopla_for_merge.p")
+    )
+
 
 def merge_hmlr(data_folder):
-    # print("Merging HMLR data.")
+    print("Merging HMLR data.")
 
-    # # Merge open leases
-    # price_data = pd.read_pickle(
-    #     os.path.join(data_folder, "working", "price_data_leaseholds.p")
-    # )
-    # lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
-    # purchased_leases = pd.read_pickle(
-    #     os.path.join(data_folder, "working", "purchased_lease_data.p")
-    # )
-    # merge_keys = merge_wrapper(
-    #     get_price_for_merge(price_data.copy()), get_lease_for_merge(lease_data.copy())
-    # )
+    # Merge open leases
+    price_data = pd.read_pickle(
+        os.path.join(data_folder, "working", "price_data_leaseholds.p")
+    )
+    lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
+    purchased_leases = pd.read_pickle(
+        os.path.join(data_folder, "working", "purchased_lease_data.p")
+    )
+    merge_keys = merge_wrapper(
+        get_price_for_merge(price_data.copy()), get_lease_for_merge(lease_data.copy())
+    )
 
-    # # Merge closed leases
-    # merged = merge_purchased_leases(price_data, purchased_leases)
+    # Merge closed leases
+    merged = merge_purchased_leases(price_data, purchased_leases)
 
-    # # Merge with open leases
-    # merged = merge_open_leases(merged, merge_keys, lease_data)
+    # Merge with open leases
+    merged = merge_open_leases(merged, merge_keys, lease_data)
 
-    # # Identify extended leases
-    # merged["has_been_extended"] = (
-    #     (merged.closed_lease)
-    #     & (
-    #         (merged.date_from.dt.year + merged.number_years)
-    #         - (merged.date_from_purch.dt.year + merged.number_years_purch)
-    #         > 30
-    #     )
-    #     & (~merged.date_from.isna())
-    # )
-    # merged.loc[merged.has_been_extended, "extension_amount"] = (
-    #     merged.date_from.dt.year + merged.number_years
-    # ) - (merged.date_from_purch.dt.year + merged.number_years_purch)
+    # Identify extended leases
+    merged["has_been_extended"] = (
+        (merged.closed_lease)
+        & (
+            (merged.date_from.dt.year + merged.number_years)
+            - (merged.date_from_purch.dt.year + merged.number_years_purch)
+            > 30
+        )
+        & (~merged.date_from.isna())
+    )
+    merged.loc[merged.has_been_extended, "extension_amount"] = (
+        merged.date_from.dt.year + merged.number_years
+    ) - (merged.date_from_purch.dt.year + merged.number_years_purch)
 
-    # # Use purchased leases when available
-    # for var in ["date_from", "number_years", "date_registered"]:
-    #     merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
-    # merged.loc[merged.closed_lease, "date_registered"] = np.nan
+    # Use purchased leases when available
+    for var in ["date_from", "number_years", "date_registered"]:
+        merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
+    merged.loc[merged.closed_lease, "date_registered"] = np.nan
 
-    # # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
-    # for var in ["date_from", "number_years"]:
-    #     merged["temp"] = np.where(
-    #         (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
-    #     )
-    #     merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
-    #         "temp"
-    #     ].transform("first")
-    #     merged.drop(columns="temp", inplace=True)
+    # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
+    for var in ["date_from", "number_years"]:
+        merged["temp"] = np.where(
+            (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
+        )
+        merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
+            "temp"
+        ].transform("first")
+        merged.drop(columns="temp", inplace=True)
 
-    # merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
-    # merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
+    merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
+    merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
 
-    # # Append freeholds
-    # freeholds = pd.read_pickle(
-    #     os.path.join(data_folder, "working", "price_data_freeholds.p")
-    # )
-    # merged = pd.concat([merged, freeholds])
+    # Append freeholds
+    freeholds = pd.read_pickle(
+        os.path.join(data_folder, "working", "price_data_freeholds.p")
+    )
+    merged = pd.concat([merged, freeholds])
 
-    # merged = additional_cleaning(merged, data_folder)
-    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_all.p"))
+    merged = additional_cleaning(merged, data_folder)
+    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_all.p"))
 
-    # # Keep only flats for main data
-    # merged.drop(merged[~merged.flat].index, inplace=True)
-    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
+    # Keep only flats for main data
+    merged.drop(merged[~merged.flat].index, inplace=True)
+    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
 
-    # # Merge in hedonics data
-    # merged = merge_with_hedonics(merged, data_folder)
-    # merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_hedonics.p"))
+    # Merge in hedonics data
+    merged = merge_with_hedonics(merged, data_folder)
+    merged.to_pickle(os.path.join(data_folder, "working", "merged_hmlr_hedonics.p"))
 
     merged = pd.read_pickle(
         os.path.join(data_folder, "working", "merged_hmlr_hedonics.p")
@@ -944,35 +1059,7 @@ def merge_hmlr(data_folder):
     final.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
 
     # Create lightweight version
-    lightweight = final[
-        [
-            "property_id",
-            "date_trans",
-            "L_date_trans",
-            "year",
-            "L_year",
-            "quarter",
-            "L_quarter",
-            "years_held",
-            "d_log_price",
-            "d_pres_linear",
-            "d_pres_main",
-            "area",
-            "postcode",
-            "extension",
-            "latitude",
-            "longitude",
-            "duration2023",
-            "whb_duration",
-            "date_extended",
-            "extension_amount",
-            "duration",
-            "L_duration",
-            "number_years",
-            "date_from",
-            "not_valid_ext",
-        ]
-    ]
+    lightweight = final[lightweight_cols]
 
     lightweight.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats_lw.p"))
 
@@ -1054,6 +1141,10 @@ def update_hmlr_merge(data_folder, prev_data_folder, original_data_folder):
     combined = pd.read_pickle(os.path.join(data_folder, "working", "merged_hmlr.p"))
     final = finalize_data(combined, original_data_folder)
     final.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
+
+    # Create lightweight version
+    lightweight = final[[col for col in lightweight_cols if col in final.columns]]
+    lightweight.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats_lw.p"))
 
 
 # %%

@@ -34,15 +34,13 @@ esttab using "$tab/extension_count.tex", ///
 use "$clean/leasehold_flats.dta", clear
 
 // Set of current and future experiments
-keep if has_been_extended
-keep if date_trans < date_extended
+keep if has_been_extended | extension
+gsort property_id -extension
 gduplicates drop property_id, force
 
 gen extension_bin = 1 if round(extension_amount,5)==90
 replace extension_bin = 2 if extension_amount > 700
 replace extension_bin = 3 if extension_bin == .
-
-gen year_extended = year(date_extended)
 
 gen year_bin = "2000-2005" if year_extended>=2000 & year_extended<=2005
 replace year_bin = "2006-2010" if year_extended>2005 & year_extended<=2010

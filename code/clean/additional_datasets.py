@@ -19,8 +19,14 @@ def build_rent_panel(data_folder):
     )
 
     rightmove.rename(columns={"listingprice": "rent"}, inplace=True)
+    rightmove.loc[rightmove.rent == 0, "rent"] = np.nan
     rightmove["log_rent"] = np.log(rightmove["rent"])
-    rightmove.loc[rightmove.log_rent == -np.inf, "log_rent"] = np.nan
+
+    col = "log_rent"
+    lower = rightmove[col].quantile(0.01)
+    upper = rightmove[col].quantile(0.99)
+    rightmove[f"{col}_win"] = rightmove[col].clip(lower, upper)
+    rightmove.loc[rightmove[col] != rightmove[f"{col}_win"], col] = np.nan
 
     # Collapse by property_id and date_rm
     rightmove = (
@@ -45,8 +51,14 @@ def build_rent_panel(data_folder):
     zoopla = zoopla[zoopla["date_zoopla"].notna()]
 
     zoopla["rent"] *= 52  # Annualize rent
+    zoopla.loc[zoopla.rent == 0, "rent"] = np.nan
     zoopla["log_rent"] = np.log(zoopla["rent"])
-    zoopla.loc[zoopla.log_rent == -np.inf, "log_rent"] = np.nan
+
+    col = "log_rent"
+    lower = zoopla[col].quantile(0.01)
+    upper = zoopla[col].quantile(0.99)
+    zoopla[f"{col}_win"] = zoopla[col].clip(lower, upper)
+    zoopla.loc[zoopla[col] != zoopla[f"{col}_win"], col] = np.nan
 
     # Collapse by property_id and date_zoop
     zoopla = (
@@ -101,6 +113,18 @@ def build_rent_panel(data_folder):
         | (combined_rent.L_date_rm.isna())
     ]
 
+    # # Drop outliers
+    # l = len(combined_rent)
+    # col = "d_log_rent_ann"
+    # lower = combined_rent[col].quantile(0.01)
+    # upper = combined_rent[col].quantile(0.99)
+    # combined_rent[f"{col}_win"] = combined_rent[col].clip(lower, upper)
+    # combined_rent.drop(
+    #     combined_rent[combined_rent[col] != combined_rent[f"{col}_win"]].index,
+    #     inplace=True,
+    # )
+    # print(f"Dropped {l-len(combined_rent)} outliers.")
+
     # Merge transaction data
     combined_rent = combined_rent.merge(
         leasehold_flats[["property_id", "date_trans", "L_date_trans"]],
@@ -113,6 +137,9 @@ def build_rent_panel(data_folder):
         (combined_rent["L_date_rm"] <= combined_rent["date_trans"])
         & (combined_rent["date_rm"] >= combined_rent["date_trans"])
     ).astype(int)
+    combined_rent["has_trans"] = combined_rent.groupby(
+        ["property_id", "date_rm"]
+    ).transform("max")["has_trans"]
 
     # Remove duplicate property_id, date_rm entries
     combined_rent = combined_rent.drop_duplicates(subset=["property_id", "date_rm"])
@@ -130,6 +157,14 @@ def build_rent_panel(data_folder):
         [],
         ["interaction_term", "has_trans"],
         "d_log_rent_res",
+    )
+
+    combined_rent = residualize(
+        combined_rent.copy(),
+        "d_log_rent",
+        [],
+        ["has_trans"],
+        "d_log_rent_res_trans",
     )
 
     # Save results
@@ -164,10 +199,9 @@ def get_experiment_ids(data_folder):
 
     experiments["experiment_pid"] = experiments["property_id"]
     experiments["experiment_date"] = experiments["date_trans"]
-    experiments["date"] = experiments["date_trans"]
 
     experiments = experiments[
-        ["experiment_pid", "experiment_date", "property_id", "date"]
+        ["experiment_pid", "experiment_date", "property_id", "date_trans"]
     ]
     experiments["type"] = "extension"
     experiments.to_pickle(os.path.join(data_folder, "working", "extension_pids.p"))
@@ -176,9 +210,11 @@ def get_experiment_ids(data_folder):
     controls["experiment_pid"] = controls["pid_treated"]
     controls["experiment_date"] = controls["date_trans_treated"]
     controls["property_id"] = controls["pid_control"]
-    controls["date"] = controls["date_trans_control"]
+    controls["date_trans"] = controls["date_trans_control"]
 
-    controls = controls[["experiment_pid", "experiment_date", "property_id", "date"]]
+    controls = controls[
+        ["experiment_pid", "experiment_date", "property_id", "date_trans"]
+    ]
     controls["type"] = "control"
     controls.to_pickle(os.path.join(data_folder, "working", "control_pids.p"))
 
@@ -197,6 +233,18 @@ def get_experiment_rent_panel(data_folder):
     log_rent_panel = pd.read_pickle(
         os.path.join(data_folder, "working", "log_rent_panel.p")
     )
+    log_rent_panel = log_rent_panel[
+        [
+            "property_id",
+            "date_rm",
+            "L_date_rm",
+            "year_rm",
+            "L_year_rm",
+            "log_rent",
+            "L_log_rent",
+        ]
+        + [col for col in log_rent_panel.columns if col.startswith("d_log_rent")]
+    ]
 
     merged_df = extension_pids.merge(log_rent_panel, on="property_id", how="inner")
     merged_df = merged_df[["experiment_pid", "experiment_date"]].drop_duplicates()
@@ -257,8 +305,11 @@ def get_experiment_rent_panel(data_folder):
     )
 
 
-def make_timeseries(data_folder, year0=2003, year1=2023):
+def make_timeseries(data_folder, year0=2003, year1=None):
     df = pd.read_pickle(os.path.join(data_folder, "clean", "experiments.p"))
+
+    if not year1:
+        year1 = df.year.max()
 
     # Initialize columns for yearly, quarterly, and monthly values
     data_yearly = []
@@ -270,6 +321,8 @@ def make_timeseries(data_folder, year0=2003, year1=2023):
         print(year)
         print("-" * 10)
         estimate, se = estimate_ystar(df[df.year == year].copy())
+        if not estimate or estimate > 10:
+            estimate, se = None, None
         data_yearly.append([year, estimate, se])
 
         # Loop over each quarter
@@ -278,7 +331,7 @@ def make_timeseries(data_folder, year0=2003, year1=2023):
             estimate, se = estimate_ystar(
                 df[(df.year == year) & (df.quarter == quarter)].copy()
             )
-            if estimate > 10:
+            if not estimate or estimate > 10:
                 estimate, se = None, None
             data_quarterly.append([year, quarter, estimate, se])
 
@@ -290,7 +343,7 @@ def make_timeseries(data_folder, year0=2003, year1=2023):
                     estimate, se = estimate_ystar(
                         df[(df.year == year) & (df.month == month)].copy()
                     )
-                    if estimate > 10:
+                    if not estimate or estimate > 10:
                         estimate, se = None, None
                     data_monthly.append([year, quarter, month, estimate, se])
 
@@ -352,6 +405,22 @@ def build_event_study(data_folder):
     merged["extension_amount"] = merged.groupby("property_id")[
         "extension_amount"
     ].transform("mean")
+
+    merged = merged[
+        [
+            "property_id",
+            "date_trans",
+            "d_log_price",
+            "rsi",
+            "constant",
+            "years_held",
+            "extension",
+            "date_extended",
+            "experiment_year",
+            "experiment_duration",
+            "extension_amount",
+        ]
+    ]
 
     # Save final dataset
     merged.to_pickle(os.path.join(data_folder, "working", "for_event_study.p"))
@@ -568,6 +637,8 @@ def global_forward_rates(data_folder):
         .reset_index(drop=True)
     )
 
+    aggregated_df["year"] = aggregated_df.date.dt.year
+
     output_path = os.path.join(data_folder, "working", "global_forward.p")
     aggregated_df.to_pickle(output_path)
 
@@ -606,7 +677,6 @@ def global_rtp(data_folder):
             if house_prices_df[
                 (house_prices_df["year"] == year) & (house_prices_df["iso"] == iso)
             ].empty:
-                print(f"Dropping {iso}")
                 house_prices_df = house_prices_df[house_prices_df["iso"] != iso]
 
     # Load GDP data
@@ -624,7 +694,6 @@ def global_rtp(data_folder):
     uk_df.to_pickle(uk_rtp_path)
 
     # Aggregate rent_price globally weighted by GDP
-    global_rtp_path = os.path.join(data_folder, "working", "global_rtp.p")
     global_rtp_df = (
         house_prices_df.groupby("year")
         .apply(
@@ -632,10 +701,12 @@ def global_rtp(data_folder):
                 {"rent_price": np.average(x["rent_price"], weights=x["gdp"])}, index=[0]
             )
         )
-        .reset_index(drop=True)
+        .reset_index()
+        .drop(columns=["level_1"])
     )
+
     global_rtp_df = global_rtp_df.rename(columns={"rent_price": "rent_price_global"})
-    global_rtp_df["year"] = global_rtp_df.index
+    global_rtp_path = os.path.join(data_folder, "working", "global_rtp.p")
     global_rtp_df.to_pickle(global_rtp_path)
 
 
@@ -699,6 +770,7 @@ def rightmove_desriptions(data_folder):
         "min"
     )
     merged_df = merged_df[merged_df["d"] == merged_df["mind"]]
+    merged_df = merged_df[["property_id", "date_trans", "renovated", "date_rm"]]
 
     # Save renovations data
     renovations_path = os.path.join(data_folder, "working", "renovations.p")
@@ -721,6 +793,8 @@ def make_additional_datasets(data_folder):
 
     # print("Building event study")
     # build_event_study(data_folder)
+
+    # print("Getting housing risk premium")
     # # calculate_housing_risk_premium(data_folder)
 
     # print("Getting global valuation data")
