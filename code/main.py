@@ -24,6 +24,11 @@ if __name__ == "__main__":
     print("MAIN:")
 
     start = time.time()
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+    size = comm.Get_size()
+
     data_folder = "../data/original"
     output_folder = (
         "/Users/vbp/Princeton Dropbox/Veronica Backer Peral/Apps/Overleaf/UK Duration"

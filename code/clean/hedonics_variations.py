@@ -28,6 +28,12 @@ def get_rsi_hedonic_variations(
         for col in hedonics.columns
         if col.startswith("pres") or col.startswith("tpres")
     ]
+
+    # hedonics_cols = hedonics_cols[-30:]
+
+    if rank == 0:
+        print("Cols to process:", hedonics_cols)
+
     hedonics.drop(
         columns=[
             col
@@ -45,14 +51,15 @@ def get_rsi_hedonic_variations(
     for col in hedonics_cols:
 
         output_file = os.path.join(
-            data_folder, "working", "hedonic_variations", f"rsi_{col}.p"
+            data_folder, "working", "hedonics_variations", f"rsi_{col}.p"
         )
 
         # If we've already run this one, continue
         if os.path.exists(output_file):
             continue
 
-        print(f"\n\n{col}:\n" + "=" * 20)
+        if rank == 0:
+            print(f"\n\n{col}:\n" + "=" * 20)
 
         this_hedonic = (
             hedonics[["property_id", "date_trans", col]].dropna(subset=[col]).copy()
@@ -78,9 +85,9 @@ def get_rsi_hedonic_variations(
         local_extensions, local_controls = get_local_extensions_controls(
             df_hedonic, rank, size
         )
-        print(
-            f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
-        )
+        # print(
+        #     f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
+        # )
 
         rsi = get_rsi(
             local_extensions,
@@ -89,6 +96,7 @@ def get_rsi_hedonic_variations(
             end_date=end_date,
             case_shiller=False,
             price_var="d_pres",
+            n_jobs=n_jobs,
         )
         rsi_gather = comm.gather(rsi, root=0)
 

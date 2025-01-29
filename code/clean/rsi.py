@@ -34,7 +34,7 @@ def restrict_data(
     radii=[0.1, 0.5] + [i for i in range(1, 21)],
 ):
     # start = time.time()
-    # text += f"\n\n\n\n\nFinding controls for {row.property_id}, purchased in {row.L_date_trans} and sold in {row.date_trans} (dur2023={np.round(row.duration2023)})\n"
+    text += f"\n\n\n\n\nFinding controls for {row.property_id}, purchased in {row.L_date_trans} and sold in {row.date_trans} (dur2023={np.round(row.duration2023)})\n"
 
     # Restrict duration
     controls = control_dict[row.duration2023]
@@ -54,6 +54,9 @@ def restrict_data(
         lambda x: haversine(row.lat_rad, row.lon_rad, x["lat_rad"], x["lon_rad"]),
         axis=1,
     )
+
+    text += f"Full controls:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
+
     # Choose smallest distance such that the dates are connected
     dates = None
     for radius in radii:
@@ -93,14 +96,14 @@ def restrict_data(
             text += f">>We matched all controls. No need to keep searching.\n\n"
             break
 
-        text += f"\nRADIUS TOO SMALL: {radius}\n"
-        text += f"\n{sub[['property_id','date','L_date','duration2023','distance']].head(50)}\n\n\n"
-        connected_dates = uf.build_groups()
-        for key in connected_dates:
-            text += f"{key}: {sorted(connected_dates[key])}\n"
+        # text += f"\nRADIUS TOO SMALL: {radius}\n"
+        # text += f"\n{sub[['property_id','date','L_date','duration2023','distance']].head(50)}\n\n\n"
+        # connected_dates = uf.build_groups()
+        # for key in connected_dates:
+        #     text += f"{key}: {sorted(connected_dates[key])}\n"
 
-    text += f"Restricted controls for radius {radius}:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
-    text += f"Dates for which we are building RSI: {dates}"
+    # text += f"Restricted controls for radius {radius}:\n{controls[['property_id','duration2023','date','L_date','distance']]}\n\n"
+    # text += f"Dates for which we are building RSI: {dates}"
     # print(text)
 
     # end = time.time()
@@ -207,7 +210,7 @@ def rsi_wrapper(
     )
 
     text += f"{summary}\n\n"
-    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row[price_var]} for treated"
+    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row['d_log_price']} for treated"
     text += f"Radius = {radius}"
     # print(text)
 
@@ -436,9 +439,8 @@ def get_rsi(
                 func,
             )
         )
-    print(f"Num extensions: {len(extensions)}")
-    print(f"Num chunks: {len(chunks)}")
-    print(f"Skipped {skipped}.")
+    # print(f"Num chunks: {len(chunks)}")
+    # print(f"Skipped {skipped}.")
 
     results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
 
@@ -518,7 +520,7 @@ def load_data(
     df.drop(
         df[df.L_date_trans.isna()].index, inplace=True
     )  # First transaction of property -- for RSI we need two
-    print(f"Dropped {len_df - len(df)} impossible controls.")
+    # print(f"Dropped {len_df - len(df)} impossible controls.")
 
     # Keep only relevant columns
     if restrict_cols:
@@ -592,6 +594,21 @@ def get_local_extensions_controls(df, rank, size):
     return local_extensions, local_controls
 
 
+def prepare_directory(directory_path):
+    # Check if the directory exists
+    if os.path.exists(directory_path):
+        # If it exists, delete its contents
+        for item in os.listdir(directory_path):
+            item_path = os.path.join(directory_path, item)
+            if os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+            else:
+                os.remove(item_path)
+    else:
+        # If it doesn't exist, create the directory
+        os.makedirs(directory_path)
+
+
 def get_residuals(
     data_folder,
     start_year=1995,
@@ -618,7 +635,13 @@ def get_residuals(
     )
 
     # Get weights
-    print("Getting residuals")
+    if rank == 0:
+        print("Emptying directory")
+        prepare_directory(os.path.join(data_folder, f"working/residuals"))
+
+    if rank == 0:
+        print("Calculating residuals")
+
     residuals = get_rsi(
         local_extensions,
         local_controls,
@@ -626,53 +649,27 @@ def get_residuals(
         end_date=end_date,
         func=apply_rsi_residuals,
     )
+
     print("Residuals:", residuals, "\n=========")
 
     # Save into distinct files
     file = os.path.join(data_folder, f"working/residuals/residuals_{rank}.p")
     residuals.to_pickle(file)
 
-    # residuals_gather = comm.gather(residuals, root=0)
-    # if rank == 0:
-    #     file = os.path.join(data_folder, "working", "residuals.p")
-    #     combined_residuals = pd.concat(residuals_gather)
-    #     combined_residuals.to_pickle(file)
+    comm.Barrier()
+
+    if rank == 0:
+        print("All nodes have completed their tasks. Proceeding to the next step.")
 
 
-def construct_rsi_no_parallel(
-    data_folder,
-    start_year=1995,
-    start_quarter=1,
-    end_year=2024,
-    end_quarter=1,
-    n_jobs=16,
-):
-
-    start_date = start_year * 4 + start_quarter
-    end_date = end_year * 4 + end_quarter
-
-    df = load_data(data_folder, filepath="clean/lh_new.p")
-    df = df[df.area == "BA"]
-
-    # # Get weights
-    # print("Getting residuals")
-    # residuals = load_residuals(data_folder)
-    # df = add_weights(df, residuals)
-
-    df.drop(df[df.years_held < 2].index, inplace=True)
-    extensions, controls = get_extensions_controls(df)
-
-    rsi = get_rsi(
-        extensions,
-        controls,
-        start_date=start_date,
-        end_date=end_date,
-        case_shiller=False,
-        n_jobs=1,
-    )
-
-    file = os.path.join(data_folder, "working", "rsi_new_data_BA.p")
-    rsi.to_pickle(file)
+def load_residuals(data_folder):
+    dfs = []
+    for file in os.listdir(f"{data_folder}/working/residuals"):
+        if not file.startswith("residual"):
+            continue
+        df = pd.read_pickle(os.path.join(data_folder, "working", "residuals", file))
+        dfs.append(df)
+    return pd.concat(dfs)
 
 
 def construct_rsi(
@@ -695,7 +692,9 @@ def construct_rsi(
     # df = df[df.area.str.startswith('B')]
 
     # Get weights
-    print("Getting residuals")
+    if rank == 0:
+        print("Getting residuals")
+
     residuals = load_residuals(data_folder)
     df = add_weights(df, residuals)
 
@@ -705,7 +704,8 @@ def construct_rsi(
     )
 
     # Get RSI - including flippers
-    print("Getting RSI with flippers")
+    if rank == 0:
+        print("Getting RSI with flippers")
     rsi_flip = get_rsi(
         local_extensions,
         local_controls,
@@ -716,7 +716,8 @@ def construct_rsi(
     rsi_flip_gather = comm.gather(rsi_flip, root=0)
 
     # RSI (Baseline Method)
-    print("Getting baseline RSI")
+    if rank == 0:
+        print("Getting baseline RSI")
     df.drop(df[df.years_held < 2].index, inplace=True)
     local_extensions, local_controls = get_local_extensions_controls(df, rank, size)
     rsi = get_rsi(
@@ -727,6 +728,33 @@ def construct_rsi(
         case_shiller=True,
     )
     rsi_gather = comm.gather(rsi, root=0)
+
+    if rank == 0:
+        file = os.path.join(data_folder, "working", "rsi_flip.p")
+        combined_rsi = pd.concat(rsi_flip_gather)
+        combined_rsi.to_pickle(file)
+
+        file = os.path.join(data_folder, "working", "rsi.p")
+        combined_rsi = pd.concat(rsi_gather)
+        combined_rsi.to_pickle(file)
+
+    # RSI, no constant
+    if rank == 0:
+        print("Getting RSI with no constant in regression")
+    rsi = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=True,
+        add_constant=False,
+    )
+    rsi_nocons_gather = comm.gather(rsi, root=0)
+
+    if rank == 0:
+        file = os.path.join(data_folder, "working", "rsi_nocons.p")
+        combined_rsi = pd.concat(rsi_nocons_gather)
+        combined_rsi.to_pickle(file)
 
     # Full RSI
     rsi_full = get_rsi(
@@ -739,7 +767,23 @@ def construct_rsi(
     )
     rsi_full_gather = comm.gather(rsi_full, root=0)
 
+    # No weights
+    if rank == 0:
+        print("Getting BMN RSI")
+
+    rsi_bmn = get_rsi(
+        local_extensions,
+        local_controls,
+        start_date=start_date,
+        end_date=end_date,
+        case_shiller=False,
+    )
+    rsi_bmn_gather = comm.gather(rsi_bmn, root=0)
+
     # # Hedonics variation
+    if rank == 0:
+        print("Getting Hedonics RSI")
+
     rsi_hedonics = get_rsi(
         local_extensions,
         local_controls,
@@ -750,20 +794,10 @@ def construct_rsi(
     )
     rsi_hedonics_gather = comm.gather(rsi_hedonics, root=0)
 
-    # No weights
-    print("Getting BMN RSI")
-    print(f"Num cores: {os.cpu_count()}")
-    rsi_bmn = get_rsi(
-        local_extensions,
-        local_controls,
-        start_date=start_date,
-        end_date=end_date,
-        case_shiller=False,
-    )
-    rsi_bmn_gather = comm.gather(rsi_bmn, root=0)
-
     # Yearly
-    print("Getting annual RSI")
+    if rank == 0:
+        print("Getting annual RSI")
+
     df["date"] = df["year"]
     df["L_date"] = df["L_year"]
     df.drop(df[df.date == df.L_date].index, inplace=True)
@@ -778,7 +812,8 @@ def construct_rsi(
     rsi_yearly_gather = comm.gather(rsi_yearly, root=0)
 
     # Postcode RSI
-    print("Postcode RSI:")
+    if rank == 0:
+        print("Postcode RSI:")
 
     rsi_postcode = get_rsi(
         local_extensions,
@@ -791,14 +826,6 @@ def construct_rsi(
     rsi_postcode_gather = comm.gather(rsi_postcode, root=0)
 
     if rank == 0:
-
-        file = os.path.join(data_folder, "working", "rsi_flip.p")
-        combined_rsi = pd.concat(rsi_flip_gather)
-        combined_rsi.to_pickle(file)
-
-        file = os.path.join(data_folder, "working", "rsi.p")
-        combined_rsi = pd.concat(rsi_gather)
-        combined_rsi.to_pickle(file)
 
         file = os.path.join(data_folder, "working", "rsi_hedonics.p")
         combined_rsi = pd.concat(rsi_hedonics_gather)
