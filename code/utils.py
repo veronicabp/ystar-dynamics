@@ -21,6 +21,7 @@ import time
 import csv
 import json
 from math import ceil
+import shutil
 
 from word2number import w2n
 from textblob import TextBlob
