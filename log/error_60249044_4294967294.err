@@ -1,25 +1,0 @@
-  0%|          | 0/40 [00:00<?, ?it/s]  2%|▎         | 1/40 [00:11<07:16, 11.19s/it]  5%|▌         | 2/40 [00:22<07:04, 11.16s/it]  8%|▊         | 3/40 [00:33<06:52, 11.14s/it] 10%|█         | 4/40 [00:44<06:41, 11.14s/it] 12%|█▎        | 5/40 [00:55<06:30, 11.17s/it] 15%|█▌        | 6/40 [01:07<06:20, 11.18s/it] 18%|█▊        | 7/40 [01:18<06:09, 11.19s/it] 22%|██▎       | 9/40 [01:29<04:25,  8.57s/it] 25%|██▌       | 10/40 [01:41<04:38,  9.27s/it] 28%|██▊       | 11/40 [01:52<04:43,  9.79s/it] 30%|███       | 12/40 [02:21<07:02, 15.08s/it] 32%|███▎      | 13/40 [02:50<08:37, 19.18s/it] 35%|███▌      | 14/40 [03:01<07:19, 16.89s/it] 38%|███▊      | 15/40 [03:31<08:35, 20.62s/it] 40%|████      | 16/40 [03:42<07:09, 17.88s/it] 42%|████▎     | 17/40 [03:54<06:06, 15.95s/it] 45%|████▌     | 18/40 [04:05<05:20, 14.56s/it] 48%|████▊     | 19/40 [04:16<04:45, 13.59s/it] 50%|█████     | 20/40 [04:28<04:17, 12.90s/it] 52%|█████▎    | 21/40 [04:39<03:56, 12.43s/it] 55%|█████▌    | 22/40 [04:50<03:38, 12.13s/it] 57%|█████▊    | 23/40 [05:02<03:22, 11.93s/it] 60%|██████    | 24/40 [05:13<03:09, 11.84s/it] 62%|██████▎   | 25/40 [05:25<02:56, 11.78s/it] 65%|██████▌   | 26/40 [05:37<02:44, 11.76s/it] 68%|██████▊   | 27/40 [05:49<02:32, 11.75s/it] 70%|███████   | 28/40 [06:00<02:20, 11.74s/it] 72%|███████▎  | 29/40 [06:12<02:09, 11.74s/it] 75%|███████▌  | 30/40 [06:24<01:57, 11.71s/it] 78%|███████▊  | 31/40 [06:35<01:45, 11.73s/it] 80%|████████  | 32/40 [06:47<01:33, 11.73s/it] 82%|████████▎ | 33/40 [06:59<01:22, 11.74s/it] 85%|████████▌ | 34/40 [07:11<01:10, 11.75s/it] 88%|████████▊ | 35/40 [07:22<00:58, 11.76s/it] 90%|█████████ | 36/40 [07:34<00:47, 11.81s/it] 92%|█████████▎| 37/40 [07:46<00:35, 11.85s/it] 95%|█████████▌| 38/40 [07:58<00:23, 11.87s/it] 98%|█████████▊| 39/40 [08:10<00:11, 11.88s/it]100%|██████████| 40/40 [08:22<00:00, 11.86s/it]100%|██████████| 40/40 [08:22<00:00, 12.56s/it]
-Traceback (most recent call last):
-  File "/nfs/home2/vbperal/research/ystar-dynamics/code/main.py", line 24, in <module>
-    merge_hmlr(data_folder)
-  File "/nfs/home2/vbperal/research/ystar-dynamics/code/clean/merge_hmlr.py", line 935, in merge_hmlr
-    final = finalize_data(merged, data_folder)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/nfs/home2/vbperal/research/ystar-dynamics/code/clean/merge_hmlr.py", line 768, in finalize_data
-    df = df.copy()
-         ^^^^^^^^^
-  File "/home/vbperal/miniconda3/envs/ystar/lib/python3.12/site-packages/pandas/core/generic.py", line 6811, in copy
-    data = self._mgr.copy(deep=deep)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/vbperal/miniconda3/envs/ystar/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 604, in copy
-    res._consolidate_inplace()
-  File "/home/vbperal/miniconda3/envs/ystar/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 1788, in _consolidate_inplace
-    self.blocks = _consolidate(self.blocks)
-                  ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/vbperal/miniconda3/envs/ystar/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 2269, in _consolidate
-    merged_blocks, _ = _merge_blocks(
-                       ^^^^^^^^^^^^^^
-  File "/home/vbperal/miniconda3/envs/ystar/lib/python3.12/site-packages/pandas/core/internals/managers.py", line 2301, in _merge_blocks
-    new_values = new_values[argsort]
-                 ~~~~~~~~~~^^^^^^^^^
-numpy.core._exceptions._ArrayMemoryError: Unable to allocate 12.7 GiB for an array with shape (357, 4787374) and data type float64
