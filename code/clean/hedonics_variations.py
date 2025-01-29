@@ -177,7 +177,7 @@ def estimate_cs_stability(data_folder):
         leaseholds.copy(),
         lhs_var=f"log_price_discount",
         model_function=fh_discount_function,
-        get_se=False,
+        get_se="boot",
     )
     ystars.append(ystar)
     ses.append(se)
@@ -189,7 +189,7 @@ def estimate_cs_stability(data_folder):
             leaseholds.copy(),
             lhs_var=f"{col}_discount",
             model_function=fh_discount_function,
-            get_se=False,
+            get_se="boot",
         )
 
         ystars.append(ystar)
@@ -229,7 +229,7 @@ def estimate_qe_stability(data_folder):
     # Baseline
     ystar, se = estimate_ystar(
         df,
-        get_se=False,
+        get_se="boot",
     )
 
     ystars.append(ystar)
@@ -250,7 +250,7 @@ def estimate_qe_stability(data_folder):
         ystar, se = estimate_ystar(
             df_,
             lhs_var=f"did",
-            get_se=False,
+            get_se="boot",
         )
 
         ystars.append(ystar)

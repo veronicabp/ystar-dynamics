@@ -409,10 +409,8 @@ def get_rsi(
     skipped = 0
     chunks = []
     for key, group in extensions_grouped:
-        print(f"{key}: {len(group)}")
-
+        # print(f"{key}: {len(group)}")
         durations_list = group["duration2023"].unique()
-        # print(key, durations_list)
 
         if key not in controls_grouped:
             skipped += 1
@@ -442,13 +440,7 @@ def get_rsi(
     print(f"Num chunks: {len(chunks)}")
     print(f"Skipped {skipped}.")
 
-    # results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
-    results = []
-    for i, chunk in tqdm(enumerate(chunks)):
-        if len(chunk[0]) == 0:
-            continue
-        print(f"\n\nCHUNK{i}")
-        results.append(process_chunk(chunk))
+    results = pqdm(chunks, process_chunk, n_jobs=n_jobs)
 
     valid_results = [pd.DataFrame()] + [
         r for r in results if isinstance(r, (pd.DataFrame, pd.Series))
@@ -659,8 +651,8 @@ def construct_rsi_no_parallel(
     start_date = start_year * 4 + start_quarter
     end_date = end_year * 4 + end_quarter
 
-    df = load_data(data_folder, filepath="clean/lh_old_lw.p")
-    df = df[df.area == "B"]
+    df = load_data(data_folder, filepath="clean/lh_new.p")
+    df = df[df.area == "BA"]
 
     # # Get weights
     # print("Getting residuals")
@@ -679,7 +671,7 @@ def construct_rsi_no_parallel(
         n_jobs=1,
     )
 
-    file = os.path.join(data_folder, "working", "rsi_old_data.p")
+    file = os.path.join(data_folder, "working", "rsi_new_data_BA.p")
     rsi.to_pickle(file)
 
 

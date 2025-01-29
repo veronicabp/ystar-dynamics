@@ -20,6 +20,6 @@ twoway 	(line ystar xaxis if xaxis>=2003, lcolor(black) lpattern(solid)) ///
 		(rarea ub lb xaxis if xaxis != `last_date', color(gs10%30) lcolor(%0)) ///
 		(scatter ystar xaxis if xaxis >= $year1, mcolor("$accent1") msymbol(O) msize(vsmall)), ///
 		legend(order(4 "Monthly Real-Time Estimates") ring(0) position(2)) ///
-		xtitle("") ytitle("y*") xlabel(2000(5)2026.5) ylabel(2(1)6) ///
+		xtitle("") ytitle("y*") xlabel(2000(5)2026.6) ylabel(2(1)6) ///
 		text(`y' `x' "$month1_str" "$year1", color($accent1))
 graph export "$fig/ystar_timeseries.png", replace

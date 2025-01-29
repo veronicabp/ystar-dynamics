@@ -231,7 +231,11 @@ def baseline_ystar_function(ystar, T, k):
 
 
 def estimate_ystar(
-    df, lhs_var="did_rsi", model_function=baseline_ystar_function, get_se=True
+    df,
+    lhs_var="did_rsi",
+    model_function=baseline_ystar_function,
+    get_se=True,
+    n_boot=50,
 ):
 
     def residuals(params, T, k, lhs_var):
@@ -266,7 +270,8 @@ def estimate_ystar(
         # Extract the estimated parameter
         ystar_estimate = result.x[0]
 
-        if get_se:
+        # Option 1: Robust SEs
+        if get_se is True or get_se == "robust":
             # Calculate residuals at the solution
             resid = result.fun  # This is lhs_var - model_function(params, T, k)
 
@@ -289,6 +294,37 @@ def estimate_ystar(
 
             # Extract the robust standard error for ystar
             ystar_std_error = np.sqrt(np.diag(robust_cov))[0]
+
+        # Option 2: Boostrap SEs
+        elif get_se == "boot":
+            boot_estimates = []
+            for _ in range(n_boot):
+                # Sample with replacement
+                df_sample = df.sample(frac=1, replace=True)
+
+                # Extract columns from bootstrap sample
+                did_b = df_sample[lhs_var].values
+                T_b = df_sample["T"].values
+                k_b = df_sample["k"].values
+
+                # Try to run the same estimation on the bootstrap sample
+                try:
+                    res_b = least_squares(
+                        residuals,
+                        initial_guess,
+                        args=(T_b, k_b, did_b),
+                        bounds=([0], [np.inf]),
+                        method="trf",
+                        jac="2-point",
+                    )
+                    boot_estimates.append(res_b.x[0])
+                except:
+                    pass
+
+            if len(boot_estimates) > 1:
+                ystar_std_error = np.std(boot_estimates, ddof=1)
+            else:
+                ystar_std_error = np.nan
 
         else:
             ystar_std_error = np.nan

@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     # Download new data
 
-    # # Clean price
+    # Clean price
     # update_price_paid(data_folder)
 
     # # Clean new leases
@@ -24,17 +24,17 @@ if __name__ == "__main__":
     # end = time.time()
     # print(f">> Time elapsed to update leases: {round((end-start)/60,2)} minutes.")
 
-    # # Merge new data
-    # start = time.time()
-    # update_hmlr_merge(data_folder, prev_data_folder, original_data_folder)
-    # end = time.time()
-    # print(f">> Time elapsed to merge updated data: {round((end-start)/60,2)} minutes.")
+    # Merge new data
+    start = time.time()
+    update_hmlr_merge(data_folder, prev_data_folder, original_data_folder)
+    end = time.time()
+    print(f">> Time elapsed to merge updated data: {round((end-start)/60,2)} minutes.")
 
-    # # Create RSI
-    # start = time.time()
-    # update_rsi(data_folder, prev_data_folder, n_jobs=1)
-    # end = time.time()
-    # print(f">> Time elapsed to update RSI: {round((end-start)/60,2)} minutes.")
+    # Create RSI
+    start = time.time()
+    update_rsi(data_folder, prev_data_folder, n_jobs=1)
+    end = time.time()
+    print(f">> Time elapsed to update RSI: {round((end-start)/60,2)} minutes.")
 
     # Finalize experiments
     update_create_experiments(data_folder, prev_data_folder)
@@ -43,4 +43,4 @@ if __name__ == "__main__":
     make_timeseries(data_folder)
 
     # Convert to stata
-    output_dta(data_folder)
+    output_dta(data_folder, update=True)

@@ -53,7 +53,7 @@ def combine_rsis(
     return rsi_dfs
 
 
-def create_experiments(df_main, rsi_dfs, data_folder):
+def create_experiments(df_main, rsi_dfs, data_folder, merge_hazard=True):
 
     # Loop over each tag and merge the data
     for rsi_df in rsi_dfs:
@@ -82,12 +82,13 @@ def create_experiments(df_main, rsi_dfs, data_folder):
     df_main["year5"] = (df_main["year"] // 5) * 5
 
     # Merge in hazard rate
-    df_main["whb_duration"] = df_main["whb_duration"].round()
-    df_hazard = pd.read_pickle(os.path.join(data_folder, "clean", "hazard_rate.p"))
-    df_main = df_main.merge(df_hazard, on="whb_duration", how="left")
-    df_main["Pi"] = df_main["cum_prob"] / 100
-    df_main["Pi"] = df_main["Pi"].fillna(0)
-    df_main.drop(columns=["cum_prob"], inplace=True)
+    if merge_hazard:
+        df_main["whb_duration"] = df_main["whb_duration"].round()
+        df_hazard = pd.read_pickle(os.path.join(data_folder, "clean", "hazard_rate.p"))
+        df_main = df_main.merge(df_hazard, on="whb_duration", how="left")
+        df_main["Pi"] = df_main["cum_prob"] / 100
+        df_main["Pi"] = df_main["Pi"].fillna(0)
+        df_main.drop(columns=["cum_prob"], inplace=True)
 
     # Remove 1% of outliers
     for col in df_main.columns:
@@ -214,7 +215,9 @@ def update_create_experiments(data_folder, prev_data_folder):
 
     rsi = pd.read_pickle(os.path.join(data_folder, "working", f"rsi.p"))
     rsi_clean = clean_rsi(rsi, "")
-    df_main, _, _ = create_experiments(extensions, [rsi_clean], data_folder)
+    df_main, _, _ = create_experiments(
+        extensions, [rsi_clean], data_folder, merge_hazard=False
+    )
 
     # Merge with previous extensions
     df_main.drop(df_main[df_main.did_rsi.isna()].index, inplace=True)

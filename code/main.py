@@ -13,8 +13,7 @@ from clean.rent_rsi import construct_rent_rsi
 from clean.combine_ashe import combine_ashe_data
 from clean.hedonics_variations import *
 from clean.hazard_rate import calculate_hazard_rate
-from clean.cross_sectional_estimate import get_cross_sectional_estimates
-
+from clean.cross_sectional_estimate import *
 from analysis.section4 import *
 from analysis.compile_bootstrap import compile_bootstrap
 from analysis.appendix import *
@@ -35,31 +34,30 @@ if __name__ == "__main__":
     ################# Create dataset #################
     # get_boe_interest_rates(data_folder)
 
-    # Clean price
+    # # Clean price
     # clean_price_paid(data_folder)
 
-    # Clean new leases
+    # # Clean new leases
     # clean_leases(data_folder)
 
-    # Merge new data
+    # # Merge new data
     # convert_hedonics_data(data_folder)
     # merge_hmlr(data_folder)
 
-    # Create RSI
+    # # Create RSI
     # construct_rsi_no_parallel(data_folder)
     # get_residuals(data_folder)
-    construct_rsi_no_parallel(data_folder)
     # construct_rsi(data_folder)
     # get_rsi_hedonic_variations(data_folder)
     # bootstrap_rsi(data_folder)
 
     # construct_restrictive_controls(data_folder)
 
-    # Finalize experiments
+    # # Finalize experiments
     # calculate_hazard_rate(data_folder)
     # run_create_experiments(data_folder)
 
-    # Additional datasets
+    # # Additional datasets
     # make_additional_datasets(data_folder)
     # construct_rent_rsi(data_folder)
 
@@ -67,7 +65,6 @@ if __name__ == "__main__":
     # expand_hilber_data(data_folder)
     # get_cross_sectional_estimates(data_folder)
     # get_hedonics_variations(data_folder)
-    # compile_bootstrap(data_folder)
 
     # output_dta(data_folder)
 
@@ -78,7 +75,8 @@ if __name__ == "__main__":
     # residual_plots(data_folder, figures_folder)
     # lpa_map(data_folder, figures_folder)
     # construct_alpha_table(data_folder, tables_folder)
+    compile_bootstrap(data_folder)
 
-    end = time.time()
-    print(f"Time elapsed: {(end-start)/60}")
+    # end = time.time()
+    # print(f"Time elapsed: {(end-start)/60}")
 # %%

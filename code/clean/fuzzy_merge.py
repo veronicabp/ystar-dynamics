@@ -126,6 +126,9 @@ def fuzzy_merge(
     """
 
     # Create columns with necessary and desired fields
+    data1.reset_index(drop=True, inplace=True)
+    data2.reset_index(drop=True, inplace=True)
+
     data1[["necessary", "desired"]] = data1.swifter.apply(
         lambda row: tokenize(row[to_tokenize1], row["postcode"]),
         axis=1,
@@ -231,7 +234,7 @@ def pick_best_match(match, pid1, pid2, only_pid1=False):
                 match[pid].str.split().str[:i].apply(" ".join)
                 == match[other_pid].str.split().str[:i].apply(" ".join)
             )
-        ]
+        ].copy()
 
         # print(f"Dropped {len_before - len(match.index)} entries by using start of the sentence.")
         len_before = len(match.index)

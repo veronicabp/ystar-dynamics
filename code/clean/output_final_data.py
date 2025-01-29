@@ -79,6 +79,7 @@ def keep_cols(df):
         df.loc[df.has_been_extended.isna(), "has_been_extended"] = False
         df["has_been_extended"] = df.has_been_extended.astype(int)
 
+        df.loc[df.closed_lease.isna(), "closed_lease"] = False
         df["closed_lease"] = df.closed_lease.astype(int)
 
     return df
@@ -206,14 +207,14 @@ def output_ystar_timeseries(data_folder):
 
     # Monthly series
     ystar_monthly = ystar[
-        ["year", "month", "ystar_monthly", "ub_monthly", "lb_monthly"]
+        ["year", "month", "ystar_monthly", "ub_monthly", "lb_monthly", "se_monthly"]
     ].copy()
 
     ystar_monthly = ystar_monthly[
         (ystar_monthly.year >= 2016) & (ystar_monthly.ystar_monthly.notna())
     ].copy()
 
-    df.to_stata(
+    ystar_monthly.to_stata(
         os.path.join(data_folder, "clean", "ystar_monthly_estimates.dta"),
         write_index=False,
     )
@@ -231,6 +232,7 @@ def output_ystar_timeseries(data_folder):
     ].copy()
 
     ystar_quarterly.dropna(subset="ystar_quarterly", inplace=True)
+    ystar_quarterly.drop_duplicates(inplace=True)
     ystar_quarterly.to_stata(
         os.path.join(data_folder, "clean", "ystar_quarterly_estimates.dta"),
         write_index=False,
@@ -319,27 +321,29 @@ def output_residuals(data_folder):
     )
 
 
-def output_dta(data_folder):
+def output_dta(data_folder, update=False):
 
-    # output_rent_rsi(data_folder)
     output_ystar_timeseries(data_folder)
-    # output_hedonics_variations(data_folder)
-    # output_rent_to_price(data_folder)
-    # output_residuals(data_folder)
+
+    if not update:
+        output_rent_rsi(data_folder)
+        output_hedonics_variations(data_folder)
+        output_rent_to_price(data_folder)
+        output_residuals(data_folder)
 
     for data in [
         {"file": "clean/experiments.p", "restrict_cols": True},
-        # {"file": "clean/experiments_flip.p", "restrict_cols": True},
-        # {"file": "clean/experiments_public.p", "restrict_cols": True},
-        # {"file": "clean/leasehold_flats.p", "restrict_cols": True},
-        # {"file": "working/experiment_rent_panel.p", "restrict_cols": False},
-        # {"file": "working/experiment_pids.p", "restrict_cols": False},
-        # {"file": "working/renovations.p", "restrict_cols": False},
-        # {"file": "working/for_event_study.p", "restrict_cols": False},
-        # {"file": "working/global_forward.p", "restrict_cols": False},
-        # {"file": "working/global_rtp.p", "restrict_cols": False},
-        # {"file": "working/uk_rtp.p", "restrict_cols": False},
-        # {"file": "clean/leasehold_panel.p", "restrict_cols": False},
+        {"file": "clean/experiments_flip.p", "restrict_cols": True},
+        {"file": "clean/experiments_public.p", "restrict_cols": True},
+        {"file": "clean/leasehold_flats.p", "restrict_cols": True},
+        {"file": "working/experiment_rent_panel.p", "restrict_cols": False},
+        {"file": "working/experiment_pids.p", "restrict_cols": False},
+        {"file": "working/renovations.p", "restrict_cols": False},
+        {"file": "working/for_event_study.p", "restrict_cols": False},
+        {"file": "working/global_forward.p", "restrict_cols": False},
+        {"file": "working/global_rtp.p", "restrict_cols": False},
+        {"file": "working/uk_rtp.p", "restrict_cols": False},
+        {"file": "clean/leasehold_panel.p", "restrict_cols": False},
         {"file": "clean/ystar_by_lpas_2009-2022.p", "restrict_cols": False},
     ]:
         file = data["file"]

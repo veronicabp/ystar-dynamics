@@ -145,19 +145,9 @@ graph export "$fig/rent_to_price_timeseries.png", replace
 * Figure A.10: Time From Listing Histogram
 *******************************************
 
-use "$working/merged_hmlr.dta", clear
-keep if flat
-joinby property_id using  "$working/rightmove_merge_keys"
-joinby property_id_rm using "$working/rightmove_sales_flats.dta"
+use "$clean/leasehold_flats.dta", clear
 
-// Get listing that most closely precedes transaction
-keep if date_trans>date_rm
-gen d=date_trans - date_rm
-gegen mind=min(d), by(property_id date_trans)
-keep if d==mind 
-gduplicates drop property_id date_trans, force
-
-histogram d if d < 800 & d>0, xtitle("Days Between Last Listing and Transaction Date") percent width(7)
+histogram time_from_listing if time_from_listing < 800, xtitle("Days Between Last Listing and Transaction Date") percent width(7)
 graph export "$fig/time_from_listing_histogram.png", replace
 
 ***************************************** 
@@ -495,7 +485,7 @@ tempfile temp
 save `temp'
 
 use "$clean/uk_interest_rates.dta", clear 
-gen quarter = quarter(date)
+gen quarter = round(month+1,3)/3
 collapse uk10y15 uk10y, by(year quarter)
 
 merge 1:1 year quarter using `temp', keep(match) nogen
@@ -748,6 +738,8 @@ esttab using "$tab/mortgage_stats.tex", ///
 * Table A.5: Seasonality
 *************************************
 use "$clean/ystar_quarterly_estimates.dta", clear
+gduplicates drop 
+gen w= 1/se^2
 
 eststo clear
 eststo: reghdfe ystar i.quarter, absorb(year) vce(robust)

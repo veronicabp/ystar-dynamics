@@ -176,6 +176,7 @@ def merge_purchased_leases(price_data, purchased_leases):
 
     df["purchased_lease"] = df._merge == "both"
     df["closed_lease"] = df["closed_lease"].fillna(False)
+    df["closed_lease"] = df["closed_lease"].astype(bool)
     df.drop(columns="_merge", inplace=True)
 
     return df
@@ -186,20 +187,6 @@ def merge_open_leases(df, merge_keys, leases):
 
     df = df.merge(merge_keys, on="property_id", how="left")
     df = df.merge(leases, on="merge_key", suffixes=("_purch", ""), how="left")
-
-    # For leases identified as extended, check if transaction is pre or post extension
-    df.loc[
-        (df.extension == True) & (df.date_trans.dt.to_period("D") < df.date_registered),
-        "number_years",
-    ] = df["number_years (pre_extension)"]
-    df.loc[
-        (df.extension == True) & (df.date_trans.dt.to_period("D") < df.date_registered),
-        "date_from",
-    ] = df["date_from (pre_extension)"]
-    df.loc[
-        (df.extension == True) & (df.date_trans.dt.to_period("D") < df.date_registered),
-        "date_registered",
-    ] = df["date_registered (pre_extension)"]
 
     return df
 
@@ -977,6 +964,10 @@ def merge_hmlr(data_folder):
         os.path.join(data_folder, "working", "price_data_leaseholds.p")
     )
     lease_data = pd.read_pickle(os.path.join(data_folder, "working", "lease_data.p"))
+    lease_data.rename(
+        columns={"extension_amount": "postmay2023_extension_amount"}, inplace=True
+    )
+
     purchased_leases = pd.read_pickle(
         os.path.join(data_folder, "working", "purchased_lease_data.p")
     )
@@ -989,6 +980,18 @@ def merge_hmlr(data_folder):
 
     # Merge with open leases
     merged = merge_open_leases(merged, merge_keys, lease_data)
+
+    # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing -- this allows us identify extensions of leases for which we purchased the post-extension lease
+    for var in ["date_from", "number_years"]:
+        merged["temp"] = np.where(
+            (merged["purchased_lease"]) & (~merged["closed_lease"]),
+            merged[f"{var}_purch"],
+            np.nan,
+        )
+        merged.loc[(merged[var].isna()) & (merged["purchased_lease"]), var] = (
+            merged.groupby("property_id")["temp"].transform("first")
+        )
+        merged.drop(columns="temp", inplace=True)
 
     # Identify extended leases
     merged["has_been_extended"] = (
@@ -1009,18 +1012,55 @@ def merge_hmlr(data_folder):
         merged.loc[merged.purchased_lease, var] = merged[f"{var}_purch"]
     merged.loc[merged.closed_lease, "date_registered"] = np.nan
 
-    # If we purchased a non-closed lease title for a transaction, use that lease for transactions for which the lease is missing
-    for var in ["date_from", "number_years"]:
-        merged["temp"] = np.where(
-            (merged["purchased_lease"]) & (~merged["closed_lease"]), merged[var], np.nan
-        )
-        merged.loc[merged[var].isna(), var] = merged.groupby("property_id")[
-            "temp"
-        ].transform("first")
-        merged.drop(columns="temp", inplace=True)
-
     merged.rename(columns={"date_registered_purch": "date_expired"}, inplace=True)
     merged.loc[merged.closed_lease == False, "date_expired"] = np.nan
+
+    # Identify post May 2023 extensions
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered)
+        & (~merged.purchased_lease),
+        "has_been_extended",
+    ] = True
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered)
+        & (~merged.purchased_lease),
+        "extension_amount",
+    ] = merged["postmay2023_extension_amount"]
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered)
+        & (~merged.purchased_lease),
+        "number_years",
+    ] = merged["number_years (pre_extension)"]
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered)
+        & (~merged.purchased_lease),
+        "date_from",
+    ] = merged["date_from (pre_extension)"]
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered)
+        & (~merged.purchased_lease),
+        "date_registered",
+    ] = merged["date_registered (pre_extension)"]
+
+    merged.rename(columns={"extension": "postmay2023_extension"}, inplace=True)
+
+    # Drop if missing date from or lease started after transaction
+    len_df = len(merged)
+    merged.drop(
+        merged[
+            (
+                (merged["date_from"].isna())
+                | (merged["date_from"] > merged["date_trans"].dt.to_period("D") + 365)
+            )
+        ].index,
+        inplace=True,
+    )
+    print("Dropped", len_df - len(merged), "with lease discrepancies.")
 
     # Append freeholds
     freeholds = pd.read_pickle(
@@ -1059,7 +1099,7 @@ def merge_hmlr(data_folder):
     final.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats.p"))
 
     # Create lightweight version
-    lightweight = final[lightweight_cols]
+    lightweight = final[[col for col in lightweight_cols if col in final.columns]]
 
     lightweight.to_pickle(os.path.join(data_folder, "clean", "leasehold_flats_lw.p"))
 
@@ -1093,12 +1133,32 @@ def update_hmlr_merge(data_folder, prev_data_folder, original_data_folder):
         get_lease_for_merge(lease_data.copy()),
     )
 
+    ###############################################################################
     # 1. For all new transactions, match them to a lease in the new lease data set
     print("Merging new transactions.")
     merged = merge_open_leases(new_price_data, merge_keys, lease_data)
+
+    # For leases identified as extended, check if transaction is pre or post extension
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered),
+        "number_years",
+    ] = merged["number_years (pre_extension)"]
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered),
+        "date_from",
+    ] = merged["date_from (pre_extension)"]
+    merged.loc[
+        (merged.extension == True)
+        & (merged.date_trans.dt.to_period("D") < merged.date_registered),
+        "date_registered",
+    ] = merged["date_registered (pre_extension)"]
+
     merged = additional_cleaning(merged, original_data_folder)
     print(len(merged), "new obs.")
 
+    #####################################################################################
     # 2. For all old transactions, make sure there's not a new lease that matches better
     print("Updating old transactions.")
     merged_old = pd.read_pickle(

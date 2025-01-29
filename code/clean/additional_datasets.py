@@ -779,27 +779,27 @@ def rightmove_desriptions(data_folder):
 
 def make_additional_datasets(data_folder):
 
-    # print("Building rent panel")
-    # build_rent_panel(data_folder)
+    print("Building rent panel")
+    build_rent_panel(data_folder)
 
-    # print("Getting experiment IDs")
-    # get_experiment_ids(data_folder)
+    print("Getting experiment IDs")
+    get_experiment_ids(data_folder)
 
-    # print("Building experiment rent panel")
-    # get_experiment_rent_panel(data_folder)
+    print("Building experiment rent panel")
+    get_experiment_rent_panel(data_folder)
 
     print("Making ystar timeseries")
     make_timeseries(data_folder)
 
-    # print("Building event study")
-    # build_event_study(data_folder)
+    print("Building event study")
+    build_event_study(data_folder)
 
-    # print("Getting housing risk premium")
-    # # calculate_housing_risk_premium(data_folder)
+    print("Getting housing risk premium")
+    # calculate_housing_risk_premium(data_folder)
 
-    # print("Getting global valuation data")
-    # global_forward_rates(data_folder)
-    # global_rtp(data_folder)
+    print("Getting global valuation data")
+    global_forward_rates(data_folder)
+    global_rtp(data_folder)
 
-    # print("Compiling rightmove descriptions")
-    # rightmove_desriptions(data_folder)
+    print("Compiling rightmove descriptions")
+    rightmove_desriptions(data_folder)

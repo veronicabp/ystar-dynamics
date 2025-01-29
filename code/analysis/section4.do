@@ -33,8 +33,6 @@ esttab using "$tab/placebo_test.tex", ///
 *************************************
 
 use "$clean/experiment_rent_panel.dta", clear
-replace d_log_rent = d_log_rent_res_trans
-replace d_log_rent_ann = d_log_rent_res_trans /((date_rm-L_date_rm)/365)
 keep if  year_rm<=year & L_year_rm>=L_year // Keep rental listings within experiment window
 
 gen control = type=="control"

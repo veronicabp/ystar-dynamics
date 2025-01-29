@@ -222,8 +222,9 @@ graph export "$fig/ystar_stability_yearfe.png", replace
 *************************************
 
 use "$clean/experiments.dta", clear
+gegen lpa_code_n = group(lpa_code)
 
-reghdfe did_rsi, absorb(year) residuals(res)
+reghdfe did_rsi, absorb(year#lpa_code_n) residuals(res)
 sum did_rsi 
 gen did_res = r(mean) + res
 
