@@ -24,7 +24,7 @@ import json
 from math import e, sin, pi, ceil, log
 
 from word2number import w2n
-from textblob import TextBlob
+# from textblob import TextBlob
 from dateutil.parser import parse
 from spellchecker import SpellChecker
 from collections import defaultdict

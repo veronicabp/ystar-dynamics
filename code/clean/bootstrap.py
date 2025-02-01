@@ -6,10 +6,6 @@ from clean.finalize_experiments import *
 
 def process_row(args):
     b, i, row, controls_sub, start_date, end_date = args
-
-    if i%1000==0:
-        print(f"\n\nBootstrap {b} --> {i}: {row.property_id} {row.date_trans}: num controls = {len(controls_sub)}")
-
     if len(controls_sub) <= 2:
         return [row.property_id, row.date_trans, np.nan]
 
@@ -128,11 +124,17 @@ def bootstrap_rsi(
     # Calculate the global iteration number for unique filenames
     for i in range(num_runs_per_process):
         b = rank * num_runs_per_process + i
-        boot_sample = resample(controls, random_state=b)
+        np.random.seed(b)
+
+        control_random_state = np.random.randint(0,10000)
+        extension_random_state = np.random.randint(0,10000)
+
+        control_boot_sample = resample(controls, random_state=control_random_state)
+        extension_boot_sample = resample(extensions, random_state=extension_random_state)
 
         if os.path.exists(os.path.join(data_folder, "working", "bootstrap", f"boot{b}.p")):
             continue
 
         print(f"\n\nRunning iteration {b}...\n" + "-"*20 + "\n")
-        run_single_boot_iteration(b, boot_sample, extensions, data_folder, start_date, end_date)
+        run_single_boot_iteration(b, control_boot_sample, extension_boot_sample, data_folder, start_date, end_date)
         print(f"Finished iteration {b}.")
