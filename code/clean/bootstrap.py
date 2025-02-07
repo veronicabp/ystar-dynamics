@@ -4,6 +4,8 @@ from utils import *
 from clean.rsi import *
 from clean.finalize_experiments import *
 
+output_folder = "bayes_bootstrap"
+
 def process_row(args):
     b, i, row, controls_sub, start_date, end_date = args
     if len(controls_sub) <= 2:
@@ -20,7 +22,8 @@ def process_row(args):
     dates = list(uf.get_group(row.date))
     dummy_vars = [f"d_{int(date)}" for i, date in enumerate(dates) if i != 0]
 
-    params, constant, summary = rsi(controls_sub, dummy_vars=dummy_vars)
+    params, constant, summary = rsi(controls_sub, dummy_vars=dummy_vars, weight_col="weight")
+    # print(f"{b}:\n\n{summary}")
 
     d_rsi = (
         params[dates.index(row["date"])] - params[dates.index(row["L_date"])] + constant
@@ -56,7 +59,7 @@ def run_single_boot_iteration(b, boot_sample, extensions, data_folder, start_dat
         results, columns=["property_id", "date_trans", f"d_rsi_boot{b}"]
     )
 
-    result_df.to_pickle(os.path.join(data_folder, "working", "bootstrap", f"boot{b}.p"))
+    result_df.to_pickle(os.path.join(data_folder, "working", output_folder, f"boot{b}.p"))
 
 
 def bootstrap_rsi(
@@ -92,29 +95,7 @@ def bootstrap_rsi(
     controls = pd.read_pickle(os.path.join(data_folder, "working", "control_pids.p"))
     controls.rename(columns={"date": "date_trans"}, inplace=True)
 
-    # Add weights for Case-Shiller RSI
-    residuals = load_residuals(data_folder)
-    controls = add_weights(controls, residuals)
-    controls = controls.merge(
-        residuals,
-        left_on=["experiment_pid", "experiment_date", "property_id", "date_trans"],
-        right_on=[
-            "pid_treated",
-            "date_trans_treated",
-            "pid_control",
-            "date_trans_control",
-        ],
-        how="inner",
-    )
-    controls["weight"] = 1 / (
-        controls["b_cons"]
-        + controls["b_years_held"] * controls["years_held"]
-        + controls["b_distance"] * controls["distance"]
-    )
-    controls = controls[
-        ["experiment_pid", "experiment_date", "property_id", "date_trans", "weight"]
-    ]
-
+    controls = controls[["experiment_pid", "experiment_date", "property_id", "date_trans"]]
     controls = controls.merge(df, on=["property_id", "date_trans"], how="inner")
 
     extensions["date"] = extensions["year"] * 4 + extensions["quarter"]
@@ -124,17 +105,15 @@ def bootstrap_rsi(
     # Calculate the global iteration number for unique filenames
     for i in range(num_runs_per_process):
         b = rank * num_runs_per_process + i
+
+        # Generate random weights from Dirichlet distribution for Bayesian bootstrap
         np.random.seed(b)
+        w = np.random.dirichlet(np.ones(len(controls)), 1)[0]
+        controls["weight"] = w
 
-        control_random_state = np.random.randint(0,10000)
-        extension_random_state = np.random.randint(0,10000)
-
-        control_boot_sample = resample(controls, random_state=control_random_state)
-        extension_boot_sample = resample(extensions, random_state=extension_random_state)
-
-        if os.path.exists(os.path.join(data_folder, "working", "bootstrap", f"boot{b}.p")):
+        if os.path.exists(os.path.join(data_folder, "working", output_folder, f"boot{b}.p")):
             continue
 
-        print(f"\n\nRunning iteration {b}...\n" + "-"*20 + "\n")
-        run_single_boot_iteration(b, control_boot_sample, extension_boot_sample, data_folder, start_date, end_date)
+        print(f"\n\nRunning iteration {b} with total weight {w.sum()}...\n" + "-"*20 + "\n")
+        run_single_boot_iteration(b, controls, extensions, data_folder, start_date, end_date)
         print(f"Finished iteration {b}.")
