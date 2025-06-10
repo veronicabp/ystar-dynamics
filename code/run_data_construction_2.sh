@@ -14,4 +14,4 @@ source ~/.bashrc
 conda activate ystar
 
 # Run the Python script using mpirun
-mpirun -np 30 python3 main.py
+mpirun -np 30 python3 run_data_construction_2.py

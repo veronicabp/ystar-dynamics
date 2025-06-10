@@ -24,6 +24,7 @@ import json
 from math import e, sin, pi, ceil, log
 
 from word2number import w2n
+
 # from textblob import TextBlob
 from dateutil.parser import parse
 from spellchecker import SpellChecker
@@ -59,6 +60,25 @@ import warnings
 
 from pandas.errors import PerformanceWarning
 
+from clean.clean_interest_rates import get_boe_interest_rates
+from clean.price_paid import clean_price_paid
+from clean.leases import clean_leases
+from clean.merge_hmlr import merge_hmlr, convert_hedonics_data
+from clean.rsi import *
+from clean.restrictive_controls import construct_restrictive_controls
+from clean.bootstrap_rsi import bootstrap_rsi
+from clean.finalize_experiments import run_create_experiments
+from clean.additional_datasets import make_additional_datasets
+from clean.output_final_data import output_dta
+from clean.rent_rsi import construct_rent_rsi
+from clean.combine_ashe import combine_ashe_data
+from clean.hedonics_variations import *
+from clean.hazard_rate import calculate_hazard_rate
+from clean.cross_sectional_estimate import *
+from analysis.section4 import *
+from analysis.compile_bootstrap import compile_bootstrap
+from analysis.appendix import *
+
 #### Silence irrelevant warnings
 warnings.filterwarnings("ignore", category=PerformanceWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -93,6 +113,12 @@ sys.setrecursionlimit(5000)
 
 #### Define parameters
 n_jobs = int(os.cpu_count()) - 2
+
+data_folder = "../data/original"
+output_folder = "/Users/vbp/Dropbox (Personal)/Apps/Overleaf/UK Duration"
+figures_folder = os.path.join(output_folder, "Figures")
+tables_folder = os.path.join(output_folder, "Tables")
+
 
 hedonics_rm_full = [
     "bedrooms",
