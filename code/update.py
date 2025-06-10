@@ -11,18 +11,14 @@ if __name__ == "__main__":
     original_data_folder = "/Users/vbp/Princeton Dropbox/Veronica Backer Peral/Research/natural-rate/ystar-dynamics/data/original"
     prev_data_folder = original_data_folder
 
-    # Create new folder
-
-    # Download new data
-
     # Clean price
-    # update_price_paid(data_folder)
+    update_price_paid(data_folder)
 
-    # # Clean new leases
-    # start = time.time()
-    # update_leases(data_folder, prev_data_folder)
-    # end = time.time()
-    # print(f">> Time elapsed to update leases: {round((end-start)/60,2)} minutes.")
+    # Clean new leases
+    start = time.time()
+    update_leases(data_folder, prev_data_folder)
+    end = time.time()
+    print(f">> Time elapsed to update leases: {round((end-start)/60,2)} minutes.")
 
     # Merge new data
     start = time.time()

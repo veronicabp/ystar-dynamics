@@ -37,51 +37,50 @@ if __name__ == "__main__":
     tables_folder = os.path.join(output_folder, "Tables")
 
     ################# Create dataset #################
-    # get_boe_interest_rates(data_folder)
+    get_boe_interest_rates(data_folder)
 
-    # # Clean price
-    # clean_price_paid(data_folder)
+    # Clean price
+    clean_price_paid(data_folder)
 
-    # # Clean new leases
-    # clean_leases(data_folder)
+    # Clean new leases
+    clean_leases(data_folder)
 
-    # # Merge new data
-    # convert_hedonics_data(data_folder)
-    # merge_hmlr(data_folder)
+    # Merge new data
+    convert_hedonics_data(data_folder)
+    merge_hmlr(data_folder)
 
-    # # Create RSI
-    # construct_rsi_no_parallel(data_folder)
-    # get_residuals(data_folder)
-    # construct_rsi(data_folder)
-    # get_rsi_hedonic_variations(data_folder)
-    # bootstrap_rsi(data_folder)
+    # Create RSI
+    get_residuals(data_folder)
+    construct_rsi(data_folder)
+    get_rsi_hedonic_variations(data_folder)
+    bootstrap_rsi(data_folder)
 
-    # construct_restrictive_controls(data_folder)
+    construct_restrictive_controls(data_folder)
 
-    # # Finalize experiments
-    # calculate_hazard_rate(data_folder)
-    # run_create_experiments(data_folder)
+    # Finalize experiments
+    calculate_hazard_rate(data_folder)
+    run_create_experiments(data_folder)
 
-    # # Additional datasets
-    # make_additional_datasets(data_folder)
-    # construct_rent_rsi(data_folder)
+    # Additional datasets
+    make_additional_datasets(data_folder)
+    construct_rent_rsi(data_folder)
 
-    # combine_ashe_data(data_folder)
-    # expand_hilber_data(data_folder)
-    # get_cross_sectional_estimates(data_folder)
-    # get_hedonics_variations(data_folder)
+    combine_ashe_data(data_folder)
+    expand_hilber_data(data_folder)
+    get_cross_sectional_estimates(data_folder)
+    get_hedonics_variations(data_folder)
 
-    # output_dta(data_folder)
+    output_dta(data_folder)
 
     ################# Analysis #################
-    # print(">> Analysis:")
-    # create_yield_curve_figures(data_folder, figures_folder)
-    # create_differencing_out_figure(figures_folder)
-    # residual_plots(data_folder, figures_folder)
-    # lpa_map(data_folder, figures_folder)
-    # construct_alpha_table(data_folder, tables_folder)
+    print(">> Analysis:")
+    create_yield_curve_figures(data_folder, figures_folder)
+    create_differencing_out_figure(figures_folder)
+    residual_plots(data_folder, figures_folder)
+    lpa_map(data_folder, figures_folder)
+    construct_alpha_table(data_folder, tables_folder)
     compile_bootstrap(data_folder)
 
-    # end = time.time()
-    # print(f"Time elapsed: {(end-start)/60}")
+    end = time.time()
+    print(f"Time elapsed: {(end-start)/60}")
 # %%
