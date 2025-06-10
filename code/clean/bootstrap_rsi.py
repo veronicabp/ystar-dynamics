@@ -12,8 +12,26 @@ def bootstrap_rsi(
     start_month=1,
     end_year=2024,
     end_month=1,
-    n_jobs=16,
+    n_jobs=8,
 ):
+    """
+    Bootstrap the RSI calculations to create confidence intervals.
+
+    data_folder: str
+        Path to the data folder where the data is stored.
+    bootstrap_iter: int
+        Number of bootstrap iterations to perform.
+    start_year: int
+        Starting year for the RSI calculations.
+    start_month: int
+        Starting month for the RSI calculations.
+    end_year: int
+        Ending year for the RSI calculations.
+    end_month: int
+        Ending month for the RSI calculations.
+    n_jobs: int
+        Number of parallel jobs to run for RSI calculations.
+    """
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -50,7 +68,7 @@ def bootstrap_rsi(
             start_date=start_date,
             end_date=end_date,
             case_shiller=False,
-            n_jobs=8,
+            n_jobs=n_jobs,
             rank=rank,
         )
         all_results = comm.gather(rsi, root=0)

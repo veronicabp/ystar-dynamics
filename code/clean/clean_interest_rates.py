@@ -2,6 +2,17 @@ from utils import *
 
 
 def read_and_append(file1, file2, data_folder, subfolder, sheet="4. spot curve"):
+    """
+    Reads two Excel files and appends their data into a single DataFrame.
+    Args:
+        file1 (str): Name of the first Excel file.
+        file2 (str): Name of the second Excel file.
+        data_folder (str): Path to the folder containing the data files.
+        subfolder (str): Subfolder within the data folder where the files are located.
+        sheet (str): Name of the sheet to read from the Excel files.
+    Returns:
+        pd.DataFrame: A DataFrame containing the concatenated data from both files.
+    """
     df1 = pd.read_excel(
         os.path.join(data_folder, "raw", "boe", subfolder, file1),
         sheet_name=sheet,
@@ -16,6 +27,14 @@ def read_and_append(file1, file2, data_folder, subfolder, sheet="4. spot curve")
 
 
 def clean_boe_data(df, tag=""):
+    """
+    Cleans the Bank of England interest rate data.
+    Args:
+        df (pd.DataFrame): DataFrame containing the raw interest rate data.
+        tag (str): Suffix to append to the column names for differentiation.
+    Returns:
+        pd.DataFrame: A cleaned DataFrame with the date and interest rates.
+    """
     df["date"] = pd.to_datetime(df["years:"], errors="coerce")
     df.rename(
         columns={col: f"uk{col}y{tag}" for col in df.columns if type(col) == int},
@@ -34,6 +53,12 @@ def clean_boe_data(df, tag=""):
 
 
 def get_boe_interest_rates(data_folder):
+    """
+    Reads and cleans Bank of England interest rate data, including nominal and real rates,
+    and calculates forward rates for UK government bonds.
+    Args:
+        data_folder (str): Path to the folder containing the data files.
+    """
     # ------------------------------------------------------------------------------
     # 1. Nominal interest rates
     # ------------------------------------------------------------------------------

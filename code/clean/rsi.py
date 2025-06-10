@@ -133,7 +133,7 @@ def rsi(
     else:
         result = sm.OLS(y, X, missing="drop").fit()
 
-    if add_constant and ('const' in result.params):
+    if add_constant and ("const" in result.params):
         constant = result.params["const"]
         params = result.params.drop("const")
         bse = result.bse.drop("const")
@@ -615,7 +615,7 @@ def get_residuals(
     start_quarter=1,
     end_year=2024,
     end_quarter=1,
-    n_jobs=16, 
+    n_jobs=16,
 ):
 
     comm = MPI.COMM_WORLD

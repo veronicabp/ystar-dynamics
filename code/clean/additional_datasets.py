@@ -2,6 +2,12 @@ from utils import *
 
 
 def build_rent_panel(data_folder):
+    """
+    Build a rent panel dataset from Rightmove and Zoopla data.
+
+    data_folder: str
+    """
+
     leasehold_flats = pd.read_pickle(
         os.path.join(data_folder, "clean", "leasehold_flats.p")
     )
@@ -194,6 +200,12 @@ def build_rent_panel(data_folder):
 
 
 def get_experiment_ids(data_folder):
+    """
+    Create a dataset of experiment IDs for extensions and controls.
+
+    data_folder: str
+    """
+
     # Load experiments dataset
     experiments = pd.read_pickle(os.path.join(data_folder, "clean", "experiments.p"))
 
@@ -306,6 +318,14 @@ def get_experiment_rent_panel(data_folder):
 
 
 def make_timeseries(data_folder, year0=2003, year1=None):
+    """
+    Make a timeseries of ystar estimates for each year, quarter, and month.
+
+    data_folder: str
+    year0: int, starting year for the timeseries
+    year1: int, ending year for the timeseries (default is the latest year in the dataset)
+    """
+
     df = pd.read_pickle(os.path.join(data_folder, "clean", "experiments.p"))
 
     if not year1:
@@ -367,6 +387,11 @@ def make_timeseries(data_folder, year0=2003, year1=None):
 
 
 def build_event_study(data_folder):
+    """
+    Build an event study dataset for leasehold flats with extensions.
+
+    data_folder: str
+    """
     rsi_full = pd.read_pickle(os.path.join(data_folder, "working", "rsi_full.p"))
     rsi_full.rename(columns={"date_trans": "date_trans_ext"}, inplace=True)
     rsi_full.drop_duplicates(subset=["property_id", "date"], inplace=True)
@@ -560,6 +585,11 @@ def get_gdp(data_folder):
 
 
 def global_forward_rates(data_folder):
+    """
+    Create a dataset of global forward rates from 10-year and 30-year rates.
+
+    data_folder: str
+    """
     gdp_df = get_gdp(data_folder)
 
     # Load 10 Year Rate data
@@ -644,6 +674,11 @@ def global_forward_rates(data_folder):
 
 
 def global_rtp(data_folder):
+    """
+    Create a global rent-to-price ratio dataset from OECD house prices.
+
+    data_folder: str
+    """
     house_prices_path = os.path.join(data_folder, "raw", "oecd", "house_prices.csv")
     house_prices_df = pd.read_csv(house_prices_path)
     house_prices_df.columns = house_prices_df.columns.str.lower()
@@ -711,6 +746,11 @@ def global_rtp(data_folder):
 
 
 def rightmove_desriptions(data_folder):
+    """
+    Process Rightmove property descriptions to identify renovations.
+
+    data_folder: str
+    """
     descriptions_path = os.path.join(data_folder, "working", "rightmove_descriptions.p")
     descriptions_df = pd.read_pickle(descriptions_path)
 
