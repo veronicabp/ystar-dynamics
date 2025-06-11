@@ -1,5 +1,4 @@
 from clean.restrictive_controls import construct_restrictive_controls
-from clean.bootstrap_rsi import bootstrap_rsi
 from clean.hedonics_variations import get_rsi_hedonic_variations
 from clean.rsi import *
 import time
@@ -15,7 +14,6 @@ if __name__ == "__main__":
     get_residuals(data_folder)
     construct_rsi(data_folder)
     get_rsi_hedonic_variations(data_folder)
-    bootstrap_rsi(data_folder)
     construct_restrictive_controls(data_folder)
 
     end = time.time()

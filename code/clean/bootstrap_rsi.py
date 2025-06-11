@@ -5,75 +5,130 @@ from clean.rsi import *
 from clean.finalize_experiments import *
 
 
+def process_row(args):
+    b, i, row, controls_sub, start_date, end_date = args
+    if len(controls_sub) <= 2:
+        return [row.property_id, row.date_trans, np.nan]
+
+    # Check that we still have sufficient observations to produce an RSI
+    uf = get_union(controls_sub)
+    connected_dates = uf.build_groups()
+
+    if not uf.are_connected(row.date, row.L_date):
+        return [row.property_id, row.date_trans, np.nan]
+
+    controls_sub = get_dummies(controls_sub, start_date=start_date, end_date=end_date)
+    dates = list(uf.get_group(row.date))
+    dummy_vars = [f"d_{int(date)}" for i, date in enumerate(dates) if i != 0]
+
+    params, constant, summary = rsi(
+        controls_sub, dummy_vars=dummy_vars, weight_col="weight"
+    )
+    # print(f"{b}:\n\n{summary}")
+
+    d_rsi = (
+        params[dates.index(row["date"])] - params[dates.index(row["L_date"])] + constant
+    )
+
+    return [row.property_id, row.date_trans, d_rsi]
+
+
+def run_single_boot_iteration(
+    b, boot_sample, extensions, data_folder, start_date, end_date
+):
+
+    groups = {
+        key: group
+        for key, group in boot_sample.groupby(["experiment_pid", "experiment_date"])
+    }
+
+    # Get args
+    args = []
+    for i, row in extensions.iterrows():
+        if (row.property_id, row.date_trans) in groups:
+            arg = (
+                b,
+                i,
+                row,
+                groups[(row.property_id, row.date_trans)],
+                start_date,
+                end_date,
+            )
+            args.append(arg)
+
+    pool = Pool(16)
+    results = pool.map(process_row, args)
+    result_df = pd.DataFrame(
+        results, columns=["property_id", "date_trans", f"d_rsi_boot{b}"]
+    )
+
+    result_df.to_pickle(
+        os.path.join(data_folder, "working", output_folder, f"boot{b}.p")
+    )
+
+
 def bootstrap_rsi(
     data_folder,
-    bootstrap_iter=500,
+    bootstrap_iter=100,
     start_year=1995,
-    start_month=1,
+    start_quarter=1,
     end_year=2024,
-    end_month=1,
-    n_jobs=8,
+    end_quarter=1,
 ):
-    """
-    Bootstrap the RSI calculations to create confidence intervals.
-
-    data_folder: str
-        Path to the data folder where the data is stored.
-    bootstrap_iter: int
-        Number of bootstrap iterations to perform.
-    start_year: int
-        Starting year for the RSI calculations.
-    start_month: int
-        Starting month for the RSI calculations.
-    end_year: int
-        Ending year for the RSI calculations.
-    end_month: int
-        Ending month for the RSI calculations.
-    n_jobs: int
-        Number of parallel jobs to run for RSI calculations.
-    """
-
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
     size = comm.Get_size()
 
-    start_date = start_year * 4 + start_month
-    end_date = end_year * 4 + end_month
+    # Number of times each process (node) runs the function
+    num_runs_per_process = bootstrap_iter // size
 
-    df = load_data(data_folder)
-    df.drop(df[df.years_held < 2].index, inplace=True)
+    start_date = start_year * 4 + start_quarter
+    end_date = end_year * 4 + end_quarter
 
-    df = df[(df.quarter == 1) & (df.L_quarter == 1)]
+    df = load_data(data_folder, restrict_cols=False)[
+        [
+            "property_id",
+            "date_trans",
+            "L_date_trans",
+            "date",
+            "L_date",
+            "d_log_price",
+        ]
+    ].copy()
 
-    for b in range(bootstrap_iter):
+    extensions = pd.read_pickle(os.path.join(data_folder, "clean", "experiments.p"))
+    controls = pd.read_pickle(os.path.join(data_folder, "working", "control_pids.p"))
+    controls.rename(columns={"date": "date_trans"}, inplace=True)
 
-        boot_sample = resample(df, random_state=b)
+    controls = controls[
+        ["experiment_pid", "experiment_date", "property_id", "date_trans"]
+    ]
+    controls = controls.merge(df, on=["property_id", "date_trans"], how="inner")
 
-        extensions, controls = get_extensions_controls(boot_sample)
-        split = split_df_by_area(extensions, size)
+    extensions["date"] = extensions["year"] * 4 + extensions["quarter"]
+    extensions["L_date"] = extensions["L_year"] * 4 + extensions["L_quarter"]
+    extensions.reset_index(inplace=True, drop=True)
 
-        local_extensions = split[rank]
-        local_controls = controls.drop(
-            controls[~controls.area.isin(local_extensions.area.unique())].index
-        )
+    # Calculate the global iteration number for unique filenames
+    for i in range(num_runs_per_process):
+        b = rank * num_runs_per_process + i
 
-        # Get DF for this process
+        # Generate random weights from Dirichlet distribution for Bayesian bootstrap
+        np.random.seed(b)
+        w = np.random.dirichlet(np.ones(len(controls)), 1)[0]
+        controls["weight"] = w
+
+        if os.path.exists(
+            os.path.join(data_folder, "working", "bayes_bootstrap", f"boot{b}.p")
+        ):
+            continue
+
         print(
-            f"[{rank}/{size}]:\n\nNum Ext: {len(local_extensions)}\nNum Ctrl: {len(local_controls)}\n Local DF areas: {sorted(local_extensions.area.unique())}\n"
+            f"\n\nRunning iteration {b} with total weight {w.sum()}...\n"
+            + "-" * 20
+            + "\n"
         )
-
-        rsi = get_rsi(
-            local_extensions,
-            local_controls,
-            start_date=start_date,
-            end_date=end_date,
-            case_shiller=False,
-            n_jobs=n_jobs,
-            rank=rank,
+        run_single_boot_iteration(
+            b, controls, extensions, data_folder, start_date, end_date
         )
-        all_results = comm.gather(rsi, root=0)
-
-        if rank == 0:
-            file = os.path.join(data_folder, "working", "rsi", f"rsi_{b}.p")
-            combined_results = pd.concat(all_results)
-            combined_results.to_pickle(file)
+        print(f"Finished iteration {b}.")
