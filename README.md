@@ -32,3 +32,5 @@ The following files must be transferred:
     - working/hedonics_variations/*
     - working/bayes_bootstrap/*
 
+
+Note: This project uses data from Rightmove and Zoopla that is already cleaned. The code to clean this data can be found in this Github repository: https://github.com/veronicabp/uk-property-data. The cleaned data is added to the folder `/working/hedonics/`.
