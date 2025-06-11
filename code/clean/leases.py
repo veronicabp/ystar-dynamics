@@ -442,7 +442,8 @@ def apply_extract_term(chunk):
 
 
 def process_row(row):
-    return extract_term(row["term"], date_registered=row["date_registered"])
+    res = extract_term(row["term"], date_registered=row["date_registered"])
+    return res
 
 
 def get_merge_key(s):
@@ -462,17 +463,13 @@ def get_merge_key(s):
     return " ".join(s.split())
 
 
-def parallelize(df, n_jobs=int(os.cpu_count()) - 2):
-    start = time.time()
+def parallelize(df, n_jobs=4):
     df.reset_index(drop=True, inplace=True)
     rows = df.to_dict("records")
 
     results = pqdm(rows, process_row, n_jobs=n_jobs)
     new_cols = pd.DataFrame(results, columns=["number_years", "date_from", "date_to"])
     df[["number_years", "date_from", "date_to"]] = new_cols
-    end = time.time()
-    print(f"Time elapsed: {round((end-start)/60,2)} minutes.")
-
     return df
 
 
@@ -560,7 +557,7 @@ def convert_dates(df, format="DD-MM-YYYY", tags=["from", "to", "registered"]):
     return df
 
 
-def extract_terms(df, n_jobs=int(os.cpu_count()) - 2):
+def extract_terms(df):
     # Create merge key
     df["merge_key"] = df.progress_apply(
         lambda row: get_merge_key(row["associated property description"]), axis=1
@@ -647,7 +644,7 @@ def clean_purchased_leases(data_folder):
 
     closed_leases["term"] = closed_leases["term"].str.replace("_x000D_", " ")
     closed_leases["term"] = closed_leases["term"].replace(r"\s+|\\n", " ", regex=True)
-    closed_leases = parallelize(closed_leases, n_jobs=n_jobs)
+    closed_leases = parallelize(closed_leases, n_jobs=os.cpu_count() - 2)
     closed_leases["closed_lease"] = True
     closed_leases["unique_id"] = "{" + closed_leases["unique_id"] + "}"
 
@@ -792,6 +789,7 @@ def get_new_leases(df_old, df_new):
 
 
 def clean_leases(data_folder):
+    print("Cleaning closed titles.")
 
     ####### Clean closed/purchased titles
     purchased_leases = clean_purchased_leases(data_folder)
