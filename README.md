@@ -1,12 +1,13 @@
 # Replication Code for "Dynamics of the Long Term Housing Yield: Evidence from Natural Experiments."
 
-This code is separated into five parts:
+This code is separated into six parts:
 
 - run_data_construction_1.py can be run using Python 3
 - run_data_construction_2.py is run through SLURM using run_data_construction_2.sh, and is optimized to be parallelized on a cluster. Instructions to run it on the MIT cluster are included below.
 - run_data_construction_3.py can be run using Python 3
 - run_analysis.py can be run using Python 3
 - analysis/main.do can be run using Stata
+- run_bootstrap.py can be run through SLURM using run_bootstrap.sh and is optimized to be parallelized on a cluster
 
 ## Instructions for how to access MIT cluster:
 1. Transfer necessary files to the cluster via SCP
