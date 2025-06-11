@@ -15,7 +15,7 @@ scp -r -C "vbperal@eofe9.mit.edu:/nfs/home2/vbperal/research/ystar-dynamics/data
 `
 The following files must be transferred:
     - clean/leasehold_flats_lw.p
-    - 
+    - working/merged_hmlr_hedonics.p
 
 2. Run sbatch run_data_construction_2.sh
 
