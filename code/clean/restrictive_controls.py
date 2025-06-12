@@ -53,7 +53,7 @@ def apply_restrictive_controls(
 def construct_restrictive_controls(data_folder, start_date=1995, end_date=2023):
     df = load_data(
         data_folder,
-        filepath="clean/leasehold_flats.p",
+        filepath="clean/leasehold_flats_lw.p",
         extra_cols=["log_price", "L_log_price"],
     )
     df.drop(df[df.years_held <= 2].index, inplace=True)
