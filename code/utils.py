@@ -1,6 +1,7 @@
 # %%
 import sys, pysqlite3
-sys.modules['sqlite3'] = pysqlite3
+
+sys.modules["sqlite3"] = pysqlite3
 
 import pandas as pd
 import numpy as np
@@ -393,10 +394,10 @@ def log_time_elapsed(time_elapsed, part, data_folder):
 
     t = np.round(time_elapsed / 60)
     log_file = os.path.join(
-        data_folder, "log", f"log_DC{part}_{time.strftime('%Y_%m_%d')}.txt"
+        data_folder, "log", f"log_{part}_{time.strftime('%Y_%m_%d')}.txt"
     )
     with open(log_file, "w") as f:
-        f.write(f"Time elapsed in data construction (part {part}): {t} minutes\n")
+        f.write(f"Time elapsed in Part {part}: {t} minutes\n")
 
 
 # %%
