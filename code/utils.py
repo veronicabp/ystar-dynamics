@@ -59,6 +59,7 @@ from stargazer.stargazer import Stargazer
 # from memory_profiler import profile
 
 import warnings
+import shutil
 
 from pandas.errors import PerformanceWarning
 
