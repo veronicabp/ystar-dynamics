@@ -1,14 +1,15 @@
 
 // Set paths
-global folder "/Users/vbp/Princeton Dropbox/Veronica Backer Peral/Research/natural-rate/ystar-dynamics"
-global dropbox "/Users/vbp/Princeton Dropbox/Veronica Backer Peral"
+global folder "/Users/vbp/Dropbox (Personal)/research/github-projects/ystar-dynamics"
+global dropbox "/Users/vbp/Dropbox (Personal)/"
+global data_folder "$folder/data/data"
 
-global clean "$folder/data/original/clean"
-global working "$folder/data/original/working"
-global raw "$folder/data/original/raw"
+global clean "$data_folder/original/clean"
+global working "$data_folder/original/working"
+global raw "$data_folder/original/raw"
 
 global update_folder "update_03_12_24"
-global clean_update "$folder/data/$update_folder/clean"
+global clean_update "$data_folder/$update_folder/clean"
 
 
 global data "$folder/data/clean"
