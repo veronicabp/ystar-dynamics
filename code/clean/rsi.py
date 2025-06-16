@@ -210,7 +210,7 @@ def rsi_wrapper(
     )
 
     text += f"{summary}\n\n"
-    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row['d_log_price']} for treated"
+    text += f"Change of {row['property_id']} controls from {row['L_date']} to {row['date']} is {round(d_rsi,3)} -- constant is {constant}. Vs {row[price_var]} for treated"
     text += f"Radius = {radius}"
     # print(text)
 
