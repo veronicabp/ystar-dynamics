@@ -1107,9 +1107,14 @@ def merge_hmlr(data_folder):
 def update_hmlr_merge(data_folder, prev_data_folder, original_data_folder):
     # Get new transactions
     price_data = pd.read_pickle(os.path.join(data_folder, "working", "price_data.p"))
-    old_price_data = pd.read_pickle(
-        os.path.join(prev_data_folder, "working", "price_data_leaseholds.p")
-    )
+
+    path_price = os.path.join(prev_data_folder, "working", "price_data.p")
+    path_price_lh = os.path.join(prev_data_folder, "working", "price_data_leaseholds.p")
+
+    if os.path.exists(path_price_lh):
+        old_price_data = pd.read_pickle(path_price_lh)
+    else:
+        old_price_data = pd.read_pickle(path_price)
 
     new_price_data = price_data.merge(
         old_price_data, on=["property_id", "date_trans"], how="left", indicator=True

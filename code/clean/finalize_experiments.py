@@ -224,6 +224,10 @@ def update_create_experiments(data_folder, prev_data_folder):
     df_main_old = pd.read_pickle(
         os.path.join(prev_data_folder, "clean", "experiments.p")
     )
+
+    if "_merge" in df_main_old.columns:
+        df_main_old.drop(columns=["_merge"], inplace=True)
+
     df_main_old = df_main_old.merge(
         df_main[["property_id", "date_trans"]],
         on=["property_id", "date_trans"],

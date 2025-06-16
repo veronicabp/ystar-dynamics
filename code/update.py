@@ -12,6 +12,10 @@ if __name__ == "__main__":
     original_data_folder = f"{root}/original"
     prev_data_folder = original_data_folder
 
+    # data_folder = f"{root}/update_15_06_25"
+    # original_data_folder = f"{root}/original"
+    # prev_data_folder = f"{root}/update_03_12_24"
+
     # Clean price
     update_price_paid(data_folder)
 
@@ -29,7 +33,7 @@ if __name__ == "__main__":
 
     # Create RSI
     start = time.time()
-    update_rsi(data_folder, prev_data_folder, n_jobs=1)
+    update_rsi(data_folder, original_data_folder, n_jobs=1)
     end = time.time()
     print(f">> Time elapsed to update RSI: {round((end-start)/60,2)} minutes.")
 

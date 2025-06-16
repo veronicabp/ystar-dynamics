@@ -862,18 +862,18 @@ def get_start_end_date(df, freq="quarterly"):
 
 def update_rsi(
     data_folder,
-    prev_data_folder,
+    original_data_folder,
     n_jobs=1,
 ):
     df = load_data(data_folder)
-    old_df = load_data(prev_data_folder)
+    old_df = load_data(original_data_folder)
 
     start_date, end_date = get_start_end_date(df)
     print(f"Start date: {start_date/4} to End Date: {end_date/4}\n\n")
 
     # Get weights
     print("Getting residuals")
-    residuals = load_residuals(prev_data_folder)
+    residuals = load_residuals(original_data_folder)
     df = add_weights(df, residuals)
 
     df.drop(df[df.years_held < 2].index, inplace=True)
