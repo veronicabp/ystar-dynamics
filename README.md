@@ -34,3 +34,7 @@ The following files must be transferred:
 
 
 Note: This project uses data from Rightmove and Zoopla that is already cleaned. The code to clean this data can be found in this Github repository: https://github.com/veronicabp/uk-property-data. The cleaned data is added to the folder `/working/hedonics/`.
+
+## How to install data for monthly updates
+1. Lease Data: https://use-land-property-data.service.gov.uk/datasets/leases
+2. Price Data: https://www.gov.uk/government/statistical-data-sets/price-paid-data-downloads
