@@ -7,8 +7,9 @@ from clean.additional_datasets import *
 from clean.output_final_data import *
 
 if __name__ == "__main__":
-    data_folder = "/Users/vbp/Princeton Dropbox/Veronica Backer Peral/Research/natural-rate/ystar-dynamics/data/update_03_12_24"
-    original_data_folder = "/Users/vbp/Princeton Dropbox/Veronica Backer Peral/Research/natural-rate/ystar-dynamics/data/original"
+    root = "../data/data"
+    data_folder = f"{root}/update_03_12_24"
+    original_data_folder = f"{root}/original"
     prev_data_folder = original_data_folder
 
     # Clean price
