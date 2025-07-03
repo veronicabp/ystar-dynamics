@@ -38,7 +38,7 @@ def clean_rsi(df, tag):
 
 def combine_rsis(
     data_folder,
-    tags=["", "_linear", "_flip", "_bmn", "_yearly", "_nocons"],
+    tags=["", "_linear", "_flip", "_bmn", "_yearly"],
 ):
     # Loop over each tag
     rsi_dfs = []
@@ -188,7 +188,7 @@ def run_create_experiments(data_folder):
     extensions = df.drop(df[~df.extension].index)
 
     rsi_dfs = []
-    for tag in ["", "_bmn", "_yearly", "_postcode", "_hedonics", "_nocons", "_flip"]:
+    for tag in ["", "_bmn", "_yearly", "_postcode", "_hedonics", "_flip"]:
         print(f">Loading rsi{tag}")
         rsi = pd.read_pickle(os.path.join(data_folder, "working", f"rsi{tag}.p"))
         rsi_clean = clean_rsi(rsi, tag)
