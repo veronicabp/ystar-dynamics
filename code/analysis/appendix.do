@@ -62,7 +62,7 @@ foreach tag in "" "_corrected" {
 }
 
 *************************************
-* Figure A.4: Cumulative Hazard Rate
+* Figure A.10: Cumulative Hazard Rate
 *************************************
 
 use "$clean/leasehold_panel.dta", clear
@@ -835,4 +835,46 @@ gen cum_sh = cum_n/tot_n
 
 twoway (line cum_sh radius), xtitle("Radius") ytitle("Share of Experiments with Controls")
 graph export "$fig/radius_cum_share.png", replace
+
+
+
+********** Second Homes **********
+import delimited "$raw/ons/second_homes.csv", clear varnames(3)
+rename areacode lpa_code
+merge 1:1 lpa_code using "$clean/ystar_by_lpas_2009-2022.dta"
+drop if missing(d_ystar)
+
+reg ystar_all secondhomeswithnousualresidents [aw=w_all], vce(robust)
+
+twoway (scatter ystar_all secondhomeswithnousualresidents [aw=w_all]) (lfit ystar_all secondhomeswithnousualresidents [aw=w_all]) if w_all > 1, xtitle("Share of Second Homes") ytitle("Estimated y*") legend(off)
+graph export "$fig/second_homes.png", replace
+
+
+********** Buy to let **********
+use "$clean/experiments.dta", clear
+
+gen xaxis = _n+2002 if _n+2002 <=2023
+gen ystar = .
+gen ub = .
+gen lb = .
+
+gen ystar_btl = .
+gen ystar_oo = .
+
+forv year=2003/2023 {
+	di `year'
+	qui: nl $nlfunc if year==`year', initial(ystar 3)
+	qui: replace ystar = _b[/ystar] if xaxis==`year'
+	qui: replace ub = _b[/ystar] + 1.96*_se[/ystar] if xaxis==`year'
+	qui: replace lb = _b[/ystar] - 1.96*_se[/ystar] if xaxis==`year'
+	
+	qui: nl $nlfunc if year==`year' & !missing(rent), initial(ystar 3)
+	qui: replace ystar_btl = _b[/ystar] if xaxis==`year'
+	
+	qui: nl $nlfunc if year==`year' & missing(rent), initial(ystar 3)
+	qui: replace ystar_oo = _b[/ystar] if xaxis==`year'
+}
+
+twoway (line ystar ystar_btl ystar_oo xaxis) (rarea ub lb xaxis, color(gray%30) lcolor(%0)), legend(order(1 "Baseline" 2 "Buy-To-Let" 3 "Owner Occupied")) xlabel(2003(5)2023) xtitle("") ytitle("Estimated y*")
+graph export "$fig/buy_to_let_timeseries.png", replace
 

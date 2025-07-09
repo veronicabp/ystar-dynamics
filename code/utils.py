@@ -57,6 +57,10 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from stargazer.stargazer import Stargazer
 
+import QuantLib as ql
+import numpy_financial as npf
+import math
+
 # from memory_profiler import profile
 
 import warnings

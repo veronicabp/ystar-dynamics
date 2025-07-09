@@ -62,7 +62,7 @@ twoway 	(line ystar xaxis if xaxis>=2003, lcolor(black) lpattern(solid)) ///
 graph export "$fig/ystar_forward_timeseries.png", replace
 
 *****************************************
-* Table 5: Supply elasticity
+* Table 6: Supply elasticity
 *****************************************
 
 use "$clean/ystar_by_lpas_2009-2022.dta", clear
@@ -122,32 +122,6 @@ replace d_ystar_res = d_ystar_res + r(mean)
 
 binscatter2 d_ystar_res refusal_predicted_res [aw=w], xtitle("Predicted Refusal Rate") ytitle("∆y*")
 graph export "$fig/supply_elasticity_binscatter.png", replace
-
-*****************************************
-* Table 6: Risk Premium
-*****************************************
-use "$clean/ystar_by_lpas_2009-2022.dta", clear
-drop if missing(d_ystar)
-
-reg refusal_maj_7908 delchange_maj5
-predict refusal_predicted
-
-eststo clear
-eststo: reg beta refusal_predicted, vce(robust)
-eststo: reg ystar_all beta [aw=w_all], vce(robust)
-eststo: reg ystar_all beta refusal_predicted [aw=w_all], vce(robust)
-eststo: reg d_ystar beta [aw=w], vce(robust)
-eststo: reg d_ystar beta refusal_predicted [aw=w], vce(robust)
-
-esttab using "$tab/cross_sectional_risk.tex", ///
-	b(2) se(2) keep(beta refusal_predicted) ///
-	order(beta refusal_predicted) ///
-	varlabels(beta "Housing $\beta$" refusal_predicted "Predicted Refusal Rate") ///
-	mgroups("Housing $\beta$" "$ y^*$" "$\Delta y^*$", pattern(1 1 0 1) ///
-				prefix(\multicolumn{@span}{c}{) suffix(}) ///
-				span erepeat(\cmidrule(lr){@span})) ///
-	nomtitle ///
-	stats(N r2, label("N" "R2") fmt(0 2)) replace
 
 
 *****************************************
