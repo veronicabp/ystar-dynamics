@@ -148,4 +148,4 @@ The following files must be transferred:
 
 
 **Contact & Support**  
-If you encounter any issues reproducing the results or have questions about the data, please open an issue or contact Verónica Bäcker-Peral (veronicabp@mit.edu).
+If you encounter any issues reproducing the results or have questions about the data, please open an issue or contact Verónica Bäcker-Peral (vbperal@mit.edu).
